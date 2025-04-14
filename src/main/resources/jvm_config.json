@@ -1,6 +1,6 @@
 {
   "HotSpotJvm": "",
   "OpenJ9Jvm": "",
-  "GraalVmJvm": "/home/donebd/graalvm/bin/java",
+  "GraalVmJvm": "",
   "AxiomJvm": ""
 }
