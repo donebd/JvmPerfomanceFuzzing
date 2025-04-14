@@ -1,11 +1,15 @@
 plugins {
     kotlin("jvm") version "2.0.21"
     java
-//    id("antlr")
+    application
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
+group = "JvmPerfomanceFuzzing"
+version = "1.0"
+
+application {
+    mainClass.set("MainKt")
+}
 
 repositories {
     mavenCentral()
@@ -34,32 +38,37 @@ dependencies {
     implementation("org.soot-oss:sootup.java.core:1.3.0")
     implementation("org.soot-oss:sootup.jimple.parser:1.3.0")
     implementation("org.soot-oss:sootup.java.bytecode:1.3.0")
-//    implementation("org.soot-oss:sootup.java.core:1.3.0")
-//    implementation("org.soot-oss:sootup.java.sourcecode:1.3.0")
-//    implementation("org.soot-oss:sootup.java.bytecode:1.3.0")
-//    implementation("org.soot-oss:sootup.jimple.parser:1.3.0")
-//    implementation("org.soot-oss:sootup.callgraph:1.3.0")
-//    implementation("org.soot-oss:sootup.analysis:1.3.0")
-//    implementation("org.soot-oss:sootup.qilin:1.3.0")
 
     implementation("org.soot-oss:soot:4.6.0")
-
-//    antlr("org.antlr:antlr4:4.13.0") // Зависимость для ANTLR
-//    implementation("org.antlr:antlr4-runtime:4.9.3") // Runtime-библиотека ANTLR
 }
-
-//configurations.all {
-//    resolutionStrategy {
-//        force("org.antlr:antlr4-runtime:4.9.3")
-//    }
-//}
-
 
 tasks.test {
     useJUnitPlatform()
 }
 kotlin {
     jvmToolchain(11)
+}
+
+tasks.jar {
+    manifest {
+        attributes(
+            "Main-Class" to "MainKt"
+        )
+    }
+
+    // Исключаем файлы подписей при создании fat JAR
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/*.MF")
+
+    from({
+        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map {
+            zipTree(it).matching {
+                // Исключаем файлы подписей из зависимостей
+                exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/*.MF")
+            }
+        }
+    })
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 tasks.register("buildDockerImage") {

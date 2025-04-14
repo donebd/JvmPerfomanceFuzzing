@@ -41,6 +41,9 @@ ENV JAVA_OPENJ9=/opt/openj9
 ENV JAVA_GRAALVM=/opt/graalvm
 # ENV JAVA_AXIOM=/opt/axiom
 
+WORKDIR /app
+COPY . /app
+
 # Создаём конфигурационный файл для JVM путей
 RUN mkdir -p /app/src/main/resources/
 RUN echo '{ \
@@ -49,14 +52,12 @@ RUN echo '{ \
   "GraalVmJvm": "/opt/graalvm/bin/java" \
 }' > /app/src/main/resources/jvm_config.json
 
-WORKDIR /app
-COPY . /app
-
 # Сборка проекта
-RUN ./gradlew clean build
+RUN chmod +x ./gradlew && ./gradlew clean jar -x test
 
 # Создаём папку для результатов
 RUN mkdir -p /app/anomalies
 
+
 # Обновите имя JAR-файла в соответствии с вашим проектом
-ENTRYPOINT ["java", "-jar", "build/libs/jvm-fuzzer.jar"]
+ENTRYPOINT ["java", "-jar", "build/libs/JvmPerfomanceFuzzing-1.0.jar"]
