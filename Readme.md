@@ -117,7 +117,15 @@ report/
   "averageDeviation": 85.7,
   "maxDeviation": 92.3,
   "minDeviation": 79.2,
-  "description": "Группа JVM (GraalVmExecutor) медленнее по показателю времени выполнения на 85.7% по сравнению с группой (HotSpotJvmExecutor)"
+  "pairwiseDeviations": {
+        "HotSpotJvmExecutor": {
+            "GraalVmExecutor": 85.7
+        }
+    },
+  "description": "Группа JVM (HotSpotJvmExecutor) медленнее по показателю времени выполнения на 85.7% по сравнению с группой (GraalVmExecutor)",
+  "interestingnessScore": 8.5773279339335733,
+  "exitCodes": {},
+  "errorDetails": {}
 }
 ```
 
