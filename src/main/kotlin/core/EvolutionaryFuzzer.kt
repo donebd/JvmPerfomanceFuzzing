@@ -83,7 +83,7 @@ class EvolutionaryFuzzer(
             }
 
             // Сохраняем мутированный байткод
-            val classpath = File("sootOutput/mutated")
+            val classpath = File("mutations")
             val packageDir = File(classpath, packageName)
             val outputClassFile = File(packageDir, "${className}.class")
             writeMutatedBytecode(mutatedBytecode, outputClassFile)

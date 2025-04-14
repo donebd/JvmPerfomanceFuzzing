@@ -32,6 +32,9 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         val benchmarkFile = File(benchmarkDir, "$BENCHMARK_CLASS_NAME.java")
         val jsonResultFileName = "$className-${System.currentTimeMillis()}-result.json"
         val jsonResultFolder = File(classpath, "results")
+        if (!jsonResultFolder.exists()) {
+            jsonResultFolder.mkdirs()
+        }
         val jsonResultFile = File(jsonResultFolder, jsonResultFileName)
         val jmhConfig = if (quickMeasurment) {
             JmhOptions()

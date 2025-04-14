@@ -33,7 +33,7 @@ class SimpleFuzzer(
 
             val mutatedBytecode = mutator.mutate(currentBytecode, className, packageName)
 
-            val classpath = File("sootOutput/mutated")
+            val classpath = File("mutations")
             val packageDir = File(classpath, packageName)
             val outputClassFile = File(packageDir, "${className}.class")
             writeMutatedBytecode(mutatedBytecode, outputClassFile)

@@ -125,7 +125,7 @@ class DetailedMeasurementAnomalyVerifier(
         jvmOptions: List<String>
     ): List<Pair<JvmExecutor, PerformanceMetrics>> {
         val bytecodeEntry = seed.bytecodeEntry
-        val classpath = File("sootOutput/mutated")
+        val classpath = File("mutations")
         val packageDir = File(classpath, bytecodeEntry.packageName)
         val outputClassFile = File(packageDir, "${bytecodeEntry.className}.class")
 
