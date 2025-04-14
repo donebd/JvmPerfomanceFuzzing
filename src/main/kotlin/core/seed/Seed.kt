@@ -11,7 +11,7 @@ data class Seed(
     val bytecodeEntry: BytecodeEntry,
     val mutationHistory: List<MutationRecord> = emptyList(),
     var energy: Int,
-    val description: String,
+    var description: String,
     var interestingness: Double = 0.0,
     var anomalies: List<PerformanceAnomalyGroup> = emptyList(),
     val iteration: Int = 0,
@@ -44,6 +44,7 @@ data class Seed(
         this.anomalies = confirmedAnomalies
         this.interestingness = newInterestingness
         this.verified = confirmedAnomalies.isNotEmpty()
+        this.description = generateSeedDescription(anomalies, iteration)
     }
 
     override fun equals(other: Any?): Boolean {
