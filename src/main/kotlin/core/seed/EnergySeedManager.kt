@@ -129,35 +129,34 @@ class EnergySeedManager(
             seedPool.forEach { it.energy += energyBoost }
         }
 
-        // Приоритизируем верифицированные сиды, если они есть и имеют энергию
-        val verifiedSeeds = seedPool.filter { it.verified && it.energy > 0 }
-        if (verifiedSeeds.isNotEmpty()) {
-            // Вероятностный выбор среди верифицированных сидов
-            val verifiedTotalEnergy = max(1, verifiedSeeds.sumOf { it.energy })
-            var randomPoint = random.nextInt(verifiedTotalEnergy)
+        val activeSeeds = seedPool.filter { it.energy > 0 }
+        if (activeSeeds.isEmpty()) return null
 
-            for (seed in verifiedSeeds) {
-                randomPoint -= seed.energy
-                if (randomPoint < 0) {
-                    return seed
-                }
-            }
-
-            return verifiedSeeds.random()
+        // С 10% вероятностью выбираем полностью случайный сид
+        val randomExplorationChance = 0.1
+        if (random.nextDouble() < randomExplorationChance) {
+            return activeSeeds.random()
         }
 
-        // Если нет верифицированных, используем обычный вероятностный выбор
-        val finalTotalEnergy = max(1, seedPool.sumOf { it.energy })
-        var randomPoint = random.nextInt(finalTotalEnergy)
+        // В остальных случаях используем взвешенный отбор с бонусом для верифицированных
+        val verificationBonus = 2.0  // Коэффициент увеличения вероятности для верифицированных сидов
 
-        for (seed in seedPool) {
-            randomPoint -= seed.energy
+        // Создаём взвешенный список, где верифицированные сиды имеют больший вес, но не абсолютный приоритет
+        val weightedPool = activeSeeds.map { seed ->
+            seed to if (seed.verified) (seed.energy * verificationBonus).toInt() else seed.energy
+        }
+
+        val totalWeight = max(1, weightedPool.sumOf { it.second })
+        var randomPoint = random.nextInt(totalWeight)
+
+        for ((seed, weight) in weightedPool) {
+            randomPoint -= weight
             if (randomPoint < 0) {
                 return seed
             }
         }
 
-        return seedPool.random()
+        return seedPool.filter { it.energy > 0 }.randomOrNull()
     }
 
     private fun boostSeedEnergy() {
