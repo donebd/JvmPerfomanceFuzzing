@@ -5,7 +5,6 @@ import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.entity.JvmPerformanceResult
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
 import infrastructure.performance.entity.PerformanceMetrics
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -163,7 +162,7 @@ class PerformanceAnalyzerImpl(
                         pairwiseDeviations = emptyMap(),
                         description = description,
                         exitCodes = exitCodes,
-                        interestingnessScore = calculateErrorInterestingness(jvmsWithError.size, metrics.size, exitCode)
+                        interestingnessScore = calculateErrorInterestingness(jvmsWithError.size, metrics.size)
                     )
                 )
             }
@@ -178,8 +177,8 @@ class PerformanceAnalyzerImpl(
         threshold: Double,
         valueSelector: (PerformanceMetrics) -> T
     ): List<PerformanceAnomalyGroup> {
-        // Группируем JVM по производительности
-        val performanceGroups = groupJvmsByPerformance(metrics, valueSelector, threshold)
+        // Группируем JVM по производительности с учетом погрешности
+        val performanceGroups = groupJvmsByPerformanceWithError(metrics, valueSelector, threshold)
 
         if (performanceGroups.size <= 1) return emptyList()
 
@@ -195,8 +194,17 @@ class PerformanceAnalyzerImpl(
                 val avgValue1 = group1.map { (_, metric) -> valueSelector(metric).toDouble() }.average()
                 val avgValue2 = group2.map { (_, metric) -> valueSelector(metric).toDouble() }.average()
 
-                // Рассчитываем отклонение
-                val avgDeviation = calculateGroupDeviation(avgValue1, avgValue2)
+                // Средняя погрешность для групп
+                val avgError1 = group1.map { (_, metric) -> metric.scoreError }.average()
+                val avgError2 = group2.map { (_, metric) -> metric.scoreError }.average()
+
+                // Проверяем статистическую значимость различий
+                if (!isDeviationStatisticallySignificant(avgValue1, avgError1, avgValue2, avgError2)) {
+                    continue // Пропускаем статистически незначимые различия
+                }
+
+                // Рассчитываем скорректированное отклонение
+                val avgDeviation = calculateAdjustedDeviation(avgValue1, avgError1, avgValue2, avgError2)
 
                 if (avgDeviation > threshold) {
                     // Определяем, какая группа быстрее/медленнее
@@ -206,8 +214,8 @@ class PerformanceAnalyzerImpl(
                         Pair(group2, group1)
                     }
 
-                    // Рассчитываем детальные отклонения для каждой пары JVM
-                    val pairwiseDeviations = calculatePairwiseDeviations(
+                    // Рассчитываем детальные отклонения для каждой пары JVM с учетом погрешности
+                    val pairwiseDeviations = calculatePairwiseDeviationsWithError(
                         fasterGroup, slowerGroup, valueSelector
                     )
 
@@ -233,7 +241,7 @@ class PerformanceAnalyzerImpl(
                         maxDeviation = maxDeviation,
                         minDeviation = minDeviation,
                         pairwiseDeviations = pairwiseDeviations,
-                        description = generateGroupDescription(
+                        description = generateGroupDescriptionWithError(
                             groupType, fasterResults, slowerResults, avgDeviation
                         ),
                         interestingnessScore = calculatePerformanceGroupInterestingness(
@@ -249,7 +257,53 @@ class PerformanceAnalyzerImpl(
         return anomalyGroups
     }
 
-    private fun <T : Number> groupJvmsByPerformance(
+    /**
+     * Проверяет, является ли разница статистически значимой с учетом погрешности измерений
+     */
+    private fun isDeviationStatisticallySignificant(
+        value1: Double, error1: Double,
+        value2: Double, error2: Double
+    ): Boolean {
+        // Проверяем, перекрываются ли доверительные интервалы
+        val lowerBound1 = value1 - error1
+        val upperBound1 = value1 + error1
+        val lowerBound2 = value2 - error2
+        val upperBound2 = value2 + error2
+
+        // Если интервалы перекрываются, разница статистически незначима
+        return !(upperBound1 >= lowerBound2 && upperBound2 >= lowerBound1)
+    }
+
+    /**
+     * Рассчитывает скорректированное отклонение с учетом погрешности измерений
+     */
+    private fun calculateAdjustedDeviation(
+        value1: Double, error1: Double,
+        value2: Double, error2: Double
+    ): Double {
+        // Находим абсолютную разницу
+        val rawDiff = Math.abs(value1 - value2)
+
+        // Сумма погрешностей
+        val errorSum = error1 + error2
+
+        // Если разница меньше суммы погрешностей, считаем отклонение незначимым
+        if (rawDiff <= errorSum) return 0.0
+
+        // Иначе вычисляем скорректированное отклонение
+        val adjustedDiff = rawDiff - errorSum
+        val minValue = Math.min(value1, value2)
+
+        // Защита от деления на очень маленькие числа
+        if (minValue < 0.000001) return 0.0
+
+        return (adjustedDiff / minValue) * 100.0
+    }
+
+    /**
+     * Группирует JVM по производительности с учетом погрешности измерений
+     */
+    private fun <T : Number> groupJvmsByPerformanceWithError(
         metrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
         valueSelector: (PerformanceMetrics) -> T,
         threshold: Double
@@ -259,18 +313,20 @@ class PerformanceAnalyzerImpl(
         // Сортируем JVM по значению метрики
         val sortedMetrics = metrics.sortedBy { (_, metric) -> valueSelector(metric).toDouble() }
 
-        // Группируем JVM с близкими значениями метрик
+        // Группируем JVM с близкими значениями метрик с учетом погрешности
         val groups = mutableListOf<MutableList<Pair<JvmExecutor, PerformanceMetrics>>>()
         var currentGroup = mutableListOf(sortedMetrics.first())
 
         for (i in 1 until sortedMetrics.size) {
             val prev = valueSelector(sortedMetrics[i-1].second).toDouble()
+            val prevError = sortedMetrics[i-1].second.scoreError
             val curr = valueSelector(sortedMetrics[i].second).toDouble()
+            val currError = sortedMetrics[i].second.scoreError
 
-            val deviation = calculatePercentDifference(prev, curr)
-
-            if (deviation <= threshold / 2) { // Используем порог/2 для более четкого разделения групп
-                // JVM близки по производительности - добавляем в текущую группу
+            // Проверяем статистическую значимость различий
+            if (!isDeviationStatisticallySignificant(prev, prevError, curr, currError) ||
+                calculateAdjustedDeviation(prev, prevError, curr, currError) <= threshold / 2) {
+                // JVM статистически близки по производительности - добавляем в текущую группу
                 currentGroup.add(sortedMetrics[i])
             } else {
                 // Значительное отличие - создаем новую группу
@@ -287,7 +343,10 @@ class PerformanceAnalyzerImpl(
         return groups
     }
 
-    private fun <T : Number> calculatePairwiseDeviations(
+    /**
+     * Рассчитывает попарные отклонения между JVM с учетом погрешности
+     */
+    private fun <T : Number> calculatePairwiseDeviationsWithError(
         fasterGroup: List<Pair<JvmExecutor, PerformanceMetrics>>,
         slowerGroup: List<Pair<JvmExecutor, PerformanceMetrics>>,
         valueSelector: (PerformanceMetrics) -> T
@@ -297,43 +356,27 @@ class PerformanceAnalyzerImpl(
         for (slower in slowerGroup) {
             val slowerJvmName = slower.first::class.simpleName ?: "Unknown JVM"
             val slowerValue = valueSelector(slower.second).toDouble()
+            val slowerError = slower.second.scoreError
 
-            val deviations = mutableMapOf<String, Double>()
+            val deviationsForJvm = mutableMapOf<String, Double>()
 
             for (faster in fasterGroup) {
                 val fasterJvmName = faster.first::class.simpleName ?: "Unknown JVM"
                 val fasterValue = valueSelector(faster.second).toDouble()
+                val fasterError = faster.second.scoreError
 
-                val deviation = calculatePercentDifference(fasterValue, slowerValue)
-                deviations[fasterJvmName] = deviation
+                // Используем скорректированное отклонение с учетом погрешности
+                val deviation = calculateAdjustedDeviation(fasterValue, fasterError, slowerValue, slowerError)
+
+                if (deviation > 0) {  // Сохраняем только значимые отклонения
+                    deviationsForJvm[fasterJvmName] = deviation
+                }
             }
 
-            result[slowerJvmName] = deviations
+            result[slowerJvmName] = deviationsForJvm
         }
 
         return result
-    }
-
-    private fun calculateGroupDeviation(value1: Double, value2: Double): Double {
-        // Обработка специальных значений
-        if (value1 <= 0 || value2 <= 0) return 0.0
-
-        // Всегда считаем отклонение так, чтобы больший показатель сравнивался с меньшим
-        val smaller = min(value1, value2)
-        val larger = max(value1, value2)
-
-        return ((larger - smaller) / smaller) * 100
-    }
-
-    private fun calculatePercentDifference(value1: Double, value2: Double): Double {
-        // Обработка специальных значений
-        if (value1 <= 0 || value2 <= 0) return 0.0
-
-        val diff = abs(value1 - value2)
-        // Для процентной разницы используем меньшее значение как базу
-        val base = min(value1, value2)
-
-        return (diff / base) * 100
     }
 
     private fun calculatePerformanceGroupInterestingness(
@@ -365,8 +408,7 @@ class PerformanceAnalyzerImpl(
 
     private fun calculateErrorInterestingness(
         errorCount: Int,
-        totalCount: Int,
-        exitCode: Int
+        totalCount: Int
     ): Double {
         // Ошибка интереснее, если она происходит только на части JVM
         return if (errorCount < totalCount) {
@@ -376,23 +418,26 @@ class PerformanceAnalyzerImpl(
         }
     }
 
-    private fun generateGroupDescription(
+    /**
+     * Генерирует описание аномалии с указанием о статистической значимости
+     */
+    private fun generateGroupDescriptionWithError(
         groupType: AnomalyGroupType,
-        fasterJvms: List<JvmPerformanceResult>,
-        slowerJvms: List<JvmPerformanceResult>,
+        fasterResults: List<JvmPerformanceResult>,
+        slowerResults: List<JvmPerformanceResult>,
         avgDeviation: Double
     ): String {
-        val metricType = when (groupType) {
+        val metricType = when(groupType) {
             AnomalyGroupType.TIME -> "времени выполнения"
             AnomalyGroupType.MEMORY -> "использования памяти"
             else -> "производительности"
         }
 
-        val fasterNames = fasterJvms.joinToString(", ") { it.jvmName }
-        val slowerNames = slowerJvms.joinToString(", ") { it.jvmName }
+        val fasterJvms = fasterResults.joinToString(", ") { it.jvmName }
+        val slowerJvms = slowerResults.joinToString(", ") { it.jvmName }
+        val deviationFormatted = String.format("%.2f", avgDeviation)
 
-        return "Группа JVM ($slowerNames) медленнее по показателю $metricType на ${String.format("%.2f", avgDeviation)}% " +
-                "по сравнению с группой ($fasterNames)"
+        return "Группа JVM ($slowerJvms) статистически значимо медленнее по показателю $metricType на $deviationFormatted% по сравнению с группой ($fasterJvms)"
     }
 
     override fun areAnomaliesInteresting(anomalies: List<PerformanceAnomalyGroup>): Boolean {
