@@ -4,10 +4,10 @@ import core.mutation.Mutator
 import core.seed.BytecodeEntry
 import core.seed.Seed
 import infrastructure.jvm.JvmExecutor
-import infrastructure.performance.AnomalyType
 import infrastructure.performance.PerformanceAnalyzer
 import infrastructure.performance.PerformanceMeasurer
 import infrastructure.performance.anomaly.AnomalyRepository
+import infrastructure.performance.entity.SignificanceLevel
 import java.io.File
 import java.io.FileOutputStream
 
@@ -15,7 +15,7 @@ class SimpleFuzzer(
     private val mutator: Mutator,
     private val performanceMeasurer: PerformanceMeasurer,
     private val performanceAnalyzer: PerformanceAnalyzer,
-)  {
+) {
 
     fun fuzz(
         bytecode: ByteArray,
@@ -44,7 +44,7 @@ class SimpleFuzzer(
             }
 
             // Используем SIGNIFICANT для простого фаззера, так как нас интересуют явные аномалии
-            val anomalies = performanceAnalyzer.analyze(metrics, AnomalyType.SIGNIFICANT)
+            val anomalies = performanceAnalyzer.analyze(metrics, SignificanceLevel.REPORTING)
 
             if (anomalies.isNotEmpty() && performanceAnalyzer.areAnomaliesInteresting(anomalies)) {
                 // Создаем сид с аномалиями для сохранения

@@ -1,123 +1,181 @@
 package infrastructure.performance.verify
 
 import core.seed.Seed
+import infrastructure.jit.JITAnalyzer
 import infrastructure.jvm.JvmExecutor
-import infrastructure.performance.AnomalyType
 import infrastructure.performance.PerformanceAnalyzer
 import infrastructure.performance.PerformanceMeasurer
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.anomaly.AnomalyRepository
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
 import infrastructure.performance.entity.PerformanceMetrics
+import infrastructure.performance.entity.SignificanceLevel
 import java.io.File
+import java.lang.Exception
 
 /**
- * Верификатор аномалий, использующий точные измерения для подтверждения
+ * Верификатор аномалий производительности, выполняющий детальные измерения
+ * для подтверждения обнаруженных аномалий.
  */
 class DetailedMeasurementAnomalyVerifier(
     private val performanceMeasurer: PerformanceMeasurer,
     private val performanceAnalyzer: PerformanceAnalyzer,
     private val anomalyRepository: AnomalyRepository,
+    private val jitAnalyzer: JITAnalyzer? = null,
     private val periodBetweenDetailedChecks: Int = 100,
     private val minSeedsForDetailedCheck: Int = 10,
     private val countOfMostInterestedSeedsToVerify: Int = 3
 ) : AnomalyVerifier {
 
-    private val pendingSeedsForDetailedCheck = mutableSetOf<Seed>()
-    private var iterationsSinceLastDetailedCheck: Int = 0
+    companion object {
+        private const val INTEREST_REDUCTION_FACTOR = 2.0
+        private val MUTATIONS_DIR = File("mutations")
+    }
 
+    private val pendingSeeds = mutableSetOf<Seed>()
+    private var iterationsSinceLastCheck: Int = 0
+
+    /**
+     * Добавляет сид в очередь на верификацию
+     *
+     * @param seed сид для верификации
+     */
     override fun addSeedForVerification(seed: Seed) {
         if (!seed.verified) {
-            pendingSeedsForDetailedCheck.add(seed)
+            pendingSeeds.add(seed)
         }
     }
 
+    /**
+     * Проверяет, нужно ли выполнить детальную проверку аномалий
+     *
+     * @return true, если нужно выполнить проверку
+     */
     override fun shouldPerformDetailedCheck(): Boolean {
-        return iterationsSinceLastDetailedCheck >= periodBetweenDetailedChecks ||
-                pendingSeedsForDetailedCheck.size >= minSeedsForDetailedCheck
+        return iterationsSinceLastCheck >= periodBetweenDetailedChecks ||
+                pendingSeeds.size >= minSeedsForDetailedCheck
     }
 
+    /**
+     * Обработчик новой итерации фаззинга
+     */
     override fun onNewIteration() {
-        iterationsSinceLastDetailedCheck++
+        iterationsSinceLastCheck++
     }
 
+    /**
+     * Возвращает количество сидов, ожидающих верификации
+     *
+     * @return количество ожидающих сидов
+     */
     override fun getPendingSeedsCount(): Int {
-        return pendingSeedsForDetailedCheck.size
+        return pendingSeeds.size
     }
 
+    /**
+     * Выполняет детальную проверку сидов с наивысшей интересностью
+     *
+     * @param jvmExecutors список исполнителей JVM для тестирования
+     * @param jvmOptions опции JVM для запуска
+     * @return количество подтвержденных аномалий
+     */
     override fun performDetailedCheck(
         jvmExecutors: List<JvmExecutor>,
         jvmOptions: List<String>
     ): Int {
-        if (pendingSeedsForDetailedCheck.isEmpty()) {
-            return 0
-        }
+        if (pendingSeeds.isEmpty()) return 0
 
-        val topSeeds = pendingSeedsForDetailedCheck
-            .sortedByDescending { it.interestingness }
-            .take(countOfMostInterestedSeedsToVerify)
-
-        println("Выполняем детальную проверку ${topSeeds.size} лучших сидов из ${pendingSeedsForDetailedCheck.size}...")
+        val topSeeds = selectTopSeedsForVerification()
+        logStartDetailedCheck(topSeeds.size)
 
         var confirmedAnomaliesCount = 0
 
         for (seed in topSeeds) {
-            // Проверяем существующие аномалии
             if (seed.anomalies.isNotEmpty()) {
                 val confirmedCount = confirmAnomaliesAndUpdateSeed(
-                    seed,
-                    jvmExecutors,
-                    jvmOptions,
-                    VerificationPurpose.SEED_VERIFICATION
+                    seed, jvmExecutors, jvmOptions, VerificationPurpose.SEED_VERIFICATION
                 )
-
                 confirmedAnomaliesCount += confirmedCount
             }
         }
 
-        // Полностью очищаем очередь сидов на верификацию
-        pendingSeedsForDetailedCheck.clear()
-        iterationsSinceLastDetailedCheck = 0
+        resetVerificationState()
+        logVerificationComplete(confirmedAnomaliesCount)
 
-        println("Детальная проверка завершена: подтверждено $confirmedAnomaliesCount аномалий.")
         return confirmedAnomaliesCount
     }
 
+    /**
+     * Подтверждает аномалии для сида с использованием точных измерений
+     *
+     * @param seed сид для верификации
+     * @param jvmExecutors список исполнителей JVM
+     * @param jvmOptions опции JVM
+     * @param purpose цель верификации
+     * @return количество подтвержденных аномалий
+     */
     override fun confirmAnomaliesAndUpdateSeed(
         seed: Seed,
         jvmExecutors: List<JvmExecutor>,
         jvmOptions: List<String>,
         purpose: VerificationPurpose
     ): Int {
-        println("Выполняем детальную проверку сида для ${purpose.name} ...")
+        logStartSeedVerification(purpose)
 
-        // Выполняем измерения
-        val detailedMetrics = performDetailedMeasurements(seed, jvmExecutors, jvmOptions)
+        val enhancedOptions = prepareJvmOptionsWithJitLogging(jvmExecutors, jvmOptions)
 
-        // Анализируем результаты с подходящим порогом для цели верификации
-        val anomalyType = when (purpose) {
-            VerificationPurpose.SEED_VERIFICATION -> AnomalyType.POTENTIAL
-            VerificationPurpose.REPORTING -> AnomalyType.SIGNIFICANT
-        }
-        val confirmedAnomalies = performanceAnalyzer.analyze(detailedMetrics, anomalyType)
+        val detailedMetrics = performDetailedMeasurements(seed, jvmExecutors, enhancedOptions)
+        val metricsMap = detailedMetrics.toMap()
+
+        val significanceLevel = getSignificanceLevelForPurpose(purpose)
+        val confirmedAnomalies = analyzeAndEnrichAnomalies(
+            jvmExecutors, detailedMetrics, metricsMap, significanceLevel
+        )
 
         val previousInterestingness = seed.interestingness
-
-        // Определяем новую интересность
         val newInterestingness = calculateNewInterestingness(confirmedAnomalies, previousInterestingness)
 
-        // Обновляем сид на основе результатов анализа
-        seed.updateWithVerificationResults(
-            confirmedAnomalies,
-            newInterestingness
-        )
+        seed.updateWithVerificationResults(confirmedAnomalies, newInterestingness)
 
-        // Выводим результаты и при необходимости сохраняем
         return processVerificationResults(
-            seed, confirmedAnomalies, purpose,
-            previousInterestingness, newInterestingness
+            seed, confirmedAnomalies, purpose, previousInterestingness, newInterestingness
         )
     }
+
+    // --- Вспомогательные методы для управления верификацией ---
+
+    private fun selectTopSeedsForVerification(): List<Seed> {
+        return pendingSeeds
+            .sortedByDescending { it.interestingness }
+            .take(countOfMostInterestedSeedsToVerify)
+    }
+
+    private fun resetVerificationState() {
+        pendingSeeds.clear()
+        iterationsSinceLastCheck = 0
+    }
+
+    private fun prepareJvmOptionsWithJitLogging(
+        jvmExecutors: List<JvmExecutor>,
+        baseOptions: List<String>
+    ): List<String> {
+        return if (jitAnalyzer != null) {
+            baseOptions + jvmExecutors.flatMap {
+                jitAnalyzer.jitOptionsProvider.getJITLoggingOptions(it::class.simpleName ?: "")
+            }
+        } else {
+            baseOptions
+        }
+    }
+
+    private fun getSignificanceLevelForPurpose(purpose: VerificationPurpose): SignificanceLevel {
+        return when (purpose) {
+            VerificationPurpose.SEED_VERIFICATION -> SignificanceLevel.SEED_EVOLUTION
+            VerificationPurpose.REPORTING -> SignificanceLevel.REPORTING
+        }
+    }
+
+    // --- Методы работы с измерениями и анализом ---
 
     private fun performDetailedMeasurements(
         seed: Seed,
@@ -125,18 +183,52 @@ class DetailedMeasurementAnomalyVerifier(
         jvmOptions: List<String>
     ): List<Pair<JvmExecutor, PerformanceMetrics>> {
         val bytecodeEntry = seed.bytecodeEntry
-        val classpath = File("mutations")
-        val packageDir = File(classpath, bytecodeEntry.packageName)
-        val outputClassFile = File(packageDir, "${bytecodeEntry.className}.class")
+        val outputClassFile = prepareOutputClassFile(bytecodeEntry.packageName, bytecodeEntry.className)
 
-        writeMutatedBytecode(bytecodeEntry.bytecode, outputClassFile)
+        try {
+            writeMutatedBytecode(bytecodeEntry.bytecode, outputClassFile)
+        } catch (e: Exception) {
+            println("Ошибка при записи байткода: ${e.message}")
+            return emptyList()
+        }
 
         return jvmExecutors.map { executor ->
             val metrics = performanceMeasurer.measure(
-                executor, classpath, bytecodeEntry.packageName,
-                bytecodeEntry.className, false, jvmOptions
+                executor,
+                MUTATIONS_DIR,
+                bytecodeEntry.packageName,
+                bytecodeEntry.className,
+                false,
+                jvmOptions
             )
             executor to metrics
+        }
+    }
+
+    private fun prepareOutputClassFile(packageName: String, className: String): File {
+        val packageDir = File(MUTATIONS_DIR, packageName)
+        return File(packageDir, "$className.class")
+    }
+
+    private fun writeMutatedBytecode(bytecode: ByteArray, outputFile: File) {
+        outputFile.parentFile?.mkdirs()
+        outputFile.writeBytes(bytecode)
+    }
+
+    private fun analyzeAndEnrichAnomalies(
+        jvmExecutors: List<JvmExecutor>,
+        detailedMetrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
+        metricsMap: Map<JvmExecutor, PerformanceMetrics>,
+        significanceLevel: SignificanceLevel
+    ): List<PerformanceAnomalyGroup> {
+        val baseAnomalies = performanceAnalyzer.analyze(detailedMetrics, significanceLevel)
+
+        return if (jitAnalyzer != null) {
+            performanceAnalyzer.enrichAnomaliesWithJITFromLogs(
+                baseAnomalies, jvmExecutors, metricsMap, jitAnalyzer
+            )
+        } else {
+            baseAnomalies
         }
     }
 
@@ -145,11 +237,11 @@ class DetailedMeasurementAnomalyVerifier(
         previousInterestingness: Double
     ): Double {
         return if (confirmedAnomalies.isNotEmpty() &&
-            performanceAnalyzer.areAnomaliesInteresting(confirmedAnomalies)) {
+            performanceAnalyzer.areAnomaliesInteresting(confirmedAnomalies)
+        ) {
             performanceAnalyzer.calculateOverallInterestingness(confirmedAnomalies)
         } else {
-            // Уменьшаем интересность вдвое при неподтверждении
-            previousInterestingness / 2.0
+            previousInterestingness / INTEREST_REDUCTION_FACTOR
         }
     }
 
@@ -166,12 +258,26 @@ class DetailedMeasurementAnomalyVerifier(
             if (purpose == VerificationPurpose.REPORTING) {
                 anomalyRepository.saveSeedAnomalies(seed)
             }
+
             return confirmedAnomalies.size
         } else {
-            println("Аномалии не подтвердились при точном измерении для ${purpose.name}. " +
-                    "Интересность уменьшена с $previousInterestingness до $newInterestingness. ")
+            logFailedVerification(purpose, previousInterestingness, newInterestingness)
             return 0
         }
+    }
+
+    // --- Методы логирования ---
+
+    private fun logStartDetailedCheck(topSeedsCount: Int) {
+        println("Выполняем детальную проверку $topSeedsCount лучших сидов из ${pendingSeeds.size}...")
+    }
+
+    private fun logVerificationComplete(confirmedCount: Int) {
+        println("Детальная проверка завершена: подтверждено $confirmedCount аномалий.")
+    }
+
+    private fun logStartSeedVerification(purpose: VerificationPurpose) {
+        println("Выполняем детальную проверку сида для ${purpose.name}...")
     }
 
     private fun logSuccessfulVerification(
@@ -179,19 +285,44 @@ class DetailedMeasurementAnomalyVerifier(
         purpose: VerificationPurpose,
         newInterestingness: Double
     ) {
+        val anomalyCounts = buildAnomalyCounts(confirmedAnomalies)
+
+        println(
+            """
+            Аномалии подтверждены при точном измерении для ${purpose.name} 
+            (всего: ${confirmedAnomalies.size}, ${anomalyCounts}). 
+            Интересность обновлена до $newInterestingness
+            """.trimIndent().replace("\n", " ")
+        )
+    }
+
+    private fun logFailedVerification(
+        purpose: VerificationPurpose,
+        previousInterestingness: Double,
+        newInterestingness: Double
+    ) {
+        println(
+            """
+            Аномалии не подтвердились при точном измерении для ${purpose.name}.
+            Интересность уменьшена с $previousInterestingness до $newInterestingness.
+            """.trimIndent().replace("\n", " ")
+        )
+    }
+
+    private fun buildAnomalyCounts(confirmedAnomalies: List<PerformanceAnomalyGroup>): String {
         val timeAnomalies = confirmedAnomalies.count { it.anomalyType == AnomalyGroupType.TIME }
         val memoryAnomalies = confirmedAnomalies.count { it.anomalyType == AnomalyGroupType.MEMORY }
         val timeoutAnomalies = confirmedAnomalies.count { it.anomalyType == AnomalyGroupType.TIMEOUT }
         val errorAnomalies = confirmedAnomalies.count { it.anomalyType == AnomalyGroupType.ERROR }
+        val jitAnomalies = confirmedAnomalies.count { it.anomalyType == AnomalyGroupType.JIT }
 
-        println("Аномалии подтверждены при точном измерении для ${purpose.name} " +
-                "(всего: ${confirmedAnomalies.size}, время: $timeAnomalies, память: $memoryAnomalies, " +
-                "таймауты: $timeoutAnomalies, ошибки: $errorAnomalies). " +
-                "Интересность обновлена до $newInterestingness")
-    }
+        val parts = mutableListOf<String>()
+        if (timeAnomalies > 0) parts.add("время: $timeAnomalies")
+        if (memoryAnomalies > 0) parts.add("память: $memoryAnomalies")
+        if (timeoutAnomalies > 0) parts.add("таймауты: $timeoutAnomalies")
+        if (errorAnomalies > 0) parts.add("ошибки: $errorAnomalies")
+        if (jitAnomalies > 0) parts.add("JIT: $jitAnomalies")
 
-    private fun writeMutatedBytecode(bytecode: ByteArray, outputFile: File) {
-        outputFile.parentFile?.mkdirs()
-        outputFile.writeBytes(bytecode)
+        return parts.joinToString(", ")
     }
 }

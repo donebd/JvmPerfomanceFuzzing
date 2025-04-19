@@ -6,13 +6,13 @@ import core.seed.BytecodeEntry
 import core.seed.Seed
 import core.seed.SeedManager
 import infrastructure.jvm.JvmExecutor
-import infrastructure.performance.AnomalyType
+import infrastructure.jvm.JITLoggingOptionsProvider
 import infrastructure.performance.PerformanceAnalyzer
 import infrastructure.performance.PerformanceMeasurer
 import infrastructure.performance.verify.AnomalyVerifier
 import infrastructure.performance.verify.VerificationPurpose
 import infrastructure.performance.anomaly.AnomalyGroupType
-import infrastructure.performance.anomaly.PerformanceAnomalyGroup
+import infrastructure.performance.entity.SignificanceLevel
 import java.io.File
 import kotlin.math.max
 
@@ -22,8 +22,9 @@ class EvolutionaryFuzzer(
     private val performanceAnalyzer: PerformanceAnalyzer,
     private val seedManager: SeedManager,
     private val anomalyVerifier: AnomalyVerifier,
-    private val maxIterations: Int = 1000,
-    private val stagnationThreshold: Int = 50,
+    private val jitOptionsProvider: JITLoggingOptionsProvider? = null,
+    private val maxIterations: Int = 100_000,
+    private val stagnationThreshold: Int = 1000,
     private val initialEnergy: Int = 10
 ) : Fuzzer {
 
@@ -36,7 +37,8 @@ class EvolutionaryFuzzer(
                 bytecodeEntry = entry,
                 mutationHistory = mutableListOf(),
                 energy = initialEnergy,
-                description = entry.description.ifEmpty { "initial_$index" })
+                description = entry.description.ifEmpty { "initial_$index" }
+            )
         }
 
         val addedCount = seedManager.addInitialSeeds(initialSeeds)
@@ -56,7 +58,6 @@ class EvolutionaryFuzzer(
                 totalAnomaliesFound += confirmedCount
             }
 
-            // Выбираем сид для мутации по стратегии
             val selectedSeed = seedManager.selectSeedForMutation()
 
             if (selectedSeed == null) {
@@ -67,44 +68,51 @@ class EvolutionaryFuzzer(
             val className = selectedSeed.bytecodeEntry.className
             val packageName = selectedSeed.bytecodeEntry.packageName
 
-            // Уменьшаем энергию выбранного сида
             seedManager.decrementSeedEnergy(selectedSeed)
 
             println("Итерация #${iterations + 1} | Используем сид: ${selectedSeed.description} | Энергия: ${selectedSeed.energy} | Интересность: ${selectedSeed.interestingness}")
 
-            // Мутируем выбранный сид
             val mutatedBytecode = mutator.mutate(bytecode, className, packageName)
 
-            // Если мутация не изменила байткод, пропускаем итерацию
             if (mutatedBytecode.contentEquals(bytecode)) {
                 println("Мутация не произвела изменений, пропускаем")
                 iterations++
                 continue
             }
 
-            // Сохраняем мутированный байткод
             val classpath = File("mutations")
             val packageDir = File(classpath, packageName)
             val outputClassFile = File(packageDir, "${className}.class")
             writeMutatedBytecode(mutatedBytecode, outputClassFile)
 
-            // Запускаем и измеряем на всех JVM
             val metrics = jvmExecutors.map { executor ->
-                val metrics = performanceMeasurer.measure(executor, classpath, packageName, className, true, jvmOptions)
+                val jvmOptionsWithJIT = if (jitOptionsProvider != null) {
+                    jvmOptions + jitOptionsProvider.getJITLoggingOptions(executor::class.simpleName ?: "")
+                } else {
+                    jvmOptions
+                }
+                val metrics =
+                    performanceMeasurer.measure(executor, classpath, packageName, className, true, jvmOptionsWithJIT)
                 executor to metrics
             }
 
-            // 1. Анализируем результаты на потенциальные аномалии (для выбора сидов)
-            val potentialAnomalies = performanceAnalyzer.analyze(metrics, AnomalyType.POTENTIAL)
+            val (performanceAnomalies, jitResult) = performanceAnalyzer.analyzeWithJIT(
+                metrics, SignificanceLevel.SEED_EVOLUTION
+            )
+            val significantAnomalies = performanceAnalyzer.analyze(metrics, SignificanceLevel.REPORTING)
+            val jitInterestingness = jitResult.first
 
-            // 2. Отдельно анализируем на значимые аномалии (для отчетности)
-            val significantAnomalies = performanceAnalyzer.analyze(metrics, AnomalyType.SIGNIFICANT)
+            val hasPerformanceAnomalies = performanceAnalyzer.areAnomaliesInteresting(performanceAnomalies)
+            val hasJitAnomalies = jitInterestingness >= 15.0
 
-            // Проверяем интересность аномалий
-            if (performanceAnalyzer.areAnomaliesInteresting(potentialAnomalies)) {
-                // Получаем интересность для нового сида
-                val newSeedInterestingness = performanceAnalyzer.calculateOverallInterestingness(potentialAnomalies)
-                val newSeedEnergy = calculateEnergy(newSeedInterestingness)
+            if (hasPerformanceAnomalies || hasJitAnomalies) {
+                val overallInterestingness = if (hasPerformanceAnomalies) {
+                    performanceAnalyzer.calculateOverallInterestingness(performanceAnomalies) + (jitInterestingness * 0.3)
+                } else {
+                    jitInterestingness
+                }
+
+                val newSeedEnergy = calculateEnergy(overallInterestingness)
 
                 val mutationRecord = (mutator as? AdaptiveMutator)?.getLastMutationRecord()?.copy(
                     parentSeedDescription = selectedSeed.description
@@ -120,34 +128,43 @@ class EvolutionaryFuzzer(
                     bytecodeEntry = BytecodeEntry(mutatedBytecode, className, packageName),
                     mutationHistory = newMutationHistory,
                     energy = newSeedEnergy,
-                    interestingness = newSeedInterestingness,
-                    anomalies = potentialAnomalies,
+                    interestingness = overallInterestingness,
+                    anomalies = performanceAnomalies,
                     iteration = iterations
                 )
 
                 val wasAdded = seedManager.addSeed(newSeed)
 
                 if (wasAdded) {
-                    // Выводим более детальную информацию о найденных группах аномалий
-                    val timeAnomalies =
-                        potentialAnomalies.count { it.anomalyType == AnomalyGroupType.TIME }
-                    val memoryAnomalies =
-                        potentialAnomalies.count { it.anomalyType == AnomalyGroupType.MEMORY }
-                    val timeoutAnomalies =
-                        potentialAnomalies.count { it.anomalyType == AnomalyGroupType.TIMEOUT }
-                    val errorAnomalies =
-                        potentialAnomalies.count { it.anomalyType == AnomalyGroupType.ERROR }
+                    // Создаем более информативное сообщение в логе
+                    val jitAnomaliesCount = performanceAnomalies.count { it.anomalyType == AnomalyGroupType.JIT }
+                    val perfInfo = if (hasPerformanceAnomalies) {
+                        val timeAnomalies = performanceAnomalies.count { it.anomalyType == AnomalyGroupType.TIME }
+                        val memoryAnomalies = performanceAnomalies.count { it.anomalyType == AnomalyGroupType.MEMORY }
+                        val timeoutAnomalies = performanceAnomalies.count { it.anomalyType == AnomalyGroupType.TIMEOUT }
+                        val errorAnomalies = performanceAnomalies.count { it.anomalyType == AnomalyGroupType.ERROR }
+
+                        "производительность (всего: ${performanceAnomalies.size - jitAnomaliesCount}, " +
+                                "время: $timeAnomalies, память: $memoryAnomalies, " +
+                                "таймауты: $timeoutAnomalies, ошибки: $errorAnomalies)"
+                    } else ""
+
+                    val jitInfo = if (jitAnomaliesCount > 0) {
+                        "JIT-аномалии: $jitAnomaliesCount"
+                    } else ""
+
+                    val separator = if (hasPerformanceAnomalies && hasJitAnomalies) ", " else ""
 
                     println(
-                        "Найдены потенциальные аномалии (всего: ${potentialAnomalies.size}, время: $timeAnomalies, память: $memoryAnomalies, " + "таймауты: $timeoutAnomalies, ошибки: $errorAnomalies)! " + "Добавлен новый сид: ${newSeed.description} с энергией $newSeedEnergy и интересностью $newSeedInterestingness"
+                        "Найдены аномалии: $perfInfo$separator$jitInfo! " +
+                                "Добавлен новый сид: ${newSeed.description} с энергией $newSeedEnergy и интересностью $overallInterestingness"
                     )
 
                     iterationsWithoutNewSeeds = 0
-
                     anomalyVerifier.addSeedForVerification(newSeed)
 
                     if (mutator is AdaptiveMutator) {
-                        mutator.notifyNewSeedGenerated(foundAnomaly = significantAnomalies.isNotEmpty())
+                        mutator.notifyNewSeedGenerated()
                     }
 
                     // Сохраняем только значимые аномалии в репозиторий

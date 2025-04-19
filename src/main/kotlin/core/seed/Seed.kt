@@ -82,7 +82,10 @@ data class Seed(
             val timeoutPart = if (hasTimeout) "_timeout" else ""
             val errorPart = if (hasError) "_error" else ""
 
-            return "anomaly_${anomalyTypes}${deviationPart}${timeoutPart}${errorPart}_iter_${iteration}"
+            val hasJit = anomalies.any { it.anomalyType == AnomalyGroupType.JIT }
+            val jitPart = if (hasJit) "_jit" else ""
+
+            return "anomaly_${anomalyTypes}${deviationPart}${timeoutPart}${errorPart}${jitPart}_iter_${iteration}"
         }
     }
 }

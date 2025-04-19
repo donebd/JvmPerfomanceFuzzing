@@ -1,16 +1,15 @@
-import core.seed.BytecodeEntry
 import core.EvolutionaryFuzzer
 import core.mutation.AdaptiveMutator
 import core.mutation.strategy.*
+import core.seed.BytecodeEntry
 import core.seed.EnergySeedManager
 import infrastructure.bytecode.JavaByteCodeProvider
-import infrastructure.jvm.GraalVmExecutor
-import infrastructure.jvm.HotSpotJvmExecutor
-import infrastructure.jvm.JvmConfigReader
+import infrastructure.jit.JITAnalyzer
+import infrastructure.jvm.*
 import infrastructure.performance.PerformanceAnalyzerImpl
 import infrastructure.performance.PerformanceMeasurerImpl
-import infrastructure.performance.verify.DetailedMeasurementAnomalyVerifier
 import infrastructure.performance.anomaly.FileAnomalyRepository
+import infrastructure.performance.verify.DetailedMeasurementAnomalyVerifier
 import infrastructure.translator.JimpleTranslator
 
 fun main() {
@@ -46,7 +45,9 @@ fun main() {
     val perfMeasurer = PerformanceMeasurerImpl()
     val perfAnalyzer = PerformanceAnalyzerImpl()
     val anomalyRepository = FileAnomalyRepository("anomalies")
-    val anomalyVerifier = DetailedMeasurementAnomalyVerifier(perfMeasurer, perfAnalyzer, anomalyRepository)
+    val jitLoggingOptionsProvider = JITLoggingOptionsProvider()
+    val jitAnalyzer = JITAnalyzer(jitLoggingOptionsProvider)
+    val anomalyVerifier = DetailedMeasurementAnomalyVerifier(perfMeasurer, perfAnalyzer, anomalyRepository, jitAnalyzer)
 
     // Create fuzzer and executors
     val fuzzer = EvolutionaryFuzzer(
@@ -54,13 +55,15 @@ fun main() {
         perfMeasurer,
         perfAnalyzer,
         EnergySeedManager(),
-        anomalyVerifier
+        anomalyVerifier,
+        jitLoggingOptionsProvider
     )
 
     val configReader = JvmConfigReader()
     val jvmExecutors = listOf(
         HotSpotJvmExecutor(configReader),
-        GraalVmExecutor(configReader)
+        GraalVmExecutor(configReader),
+        OpenJ9JvmExecutor(configReader)
     )
 
     // Run fuzzer

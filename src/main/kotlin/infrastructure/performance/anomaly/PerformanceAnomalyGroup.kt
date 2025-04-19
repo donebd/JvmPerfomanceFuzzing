@@ -18,5 +18,6 @@ data class PerformanceAnomalyGroup(
     val interestingnessScore: Double,
     // Дополнительная информация для специальных случаев
     val exitCodes: Map<String, Int> = emptyMap(),        // Коды выхода для JVM с ошибками
-    val errorDetails: Map<String, String> = emptyMap()   // Детали ошибок
+    val errorDetails: Map<String, String> = emptyMap(),   // Детали ошибок
+    val jitData: JITAnomalyData? = null
 )

@@ -2,11 +2,15 @@ package infrastructure.performance.anomaly
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import core.seed.Seed
+import infrastructure.jit.JITReportGenerator
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-class FileAnomalyRepository(private val directoryPath: String) : AnomalyRepository {
+class FileAnomalyRepository(
+    private val directoryPath: String,
+    private val jitReportGenerator: JITReportGenerator = JITReportGenerator()
+) : AnomalyRepository {
     private val objectMapper = jacksonObjectMapper()
 
     // Базовая директория
@@ -62,6 +66,20 @@ class FileAnomalyRepository(private val directoryPath: String) : AnomalyReposito
             anomalyFile.writeText(objectMapper.writeValueAsString(anomalyGroup))
         }
 
+        seed.anomalies.forEachIndexed { index, anomalyGroup ->
+            if (anomalyGroup.jitData != null) {
+                val jitDir = File(anomaliesDir, "jit_analysis")
+                jitDir.mkdirs()
+
+                // Используем генератор отчета
+                val report = jitReportGenerator.generateMarkdownReport(anomalyGroup.jitData)
+                File(jitDir, "jit_report_$index.md").writeText(report)
+
+                val detailsFile = File(jitDir, "jit_details_$index.json")
+                detailsFile.writeText(objectMapper.writeValueAsString(anomalyGroup.jitData))
+            }
+        }
+
         println("Сохранено ${seed.anomalies.size} аномалий для сида ${seed.description} в ${seedDir.absolutePath}")
     }
 
@@ -73,16 +91,22 @@ class FileAnomalyRepository(private val directoryPath: String) : AnomalyReposito
     private fun generateFilePrefix(anomaly: PerformanceAnomalyGroup, index: Int, timestamp: String): String {
         val anomalyType = anomaly.anomalyType.name.lowercase()
 
-        // Формируем краткое описание аномалии в зависимости от типа
         val anomalyDescription = when (anomaly.anomalyType) {
             AnomalyGroupType.TIME, AnomalyGroupType.MEMORY -> {
                 val deviation = String.format("%.0f", anomaly.averageDeviation)
                 "${anomalyType}_dev${deviation}pct"
             }
+
             AnomalyGroupType.TIMEOUT -> "timeout"
             AnomalyGroupType.ERROR -> {
                 val exitCode = anomaly.exitCodes.values.firstOrNull() ?: "unknown"
                 "error_code${exitCode}"
+            }
+
+            AnomalyGroupType.JIT -> {
+                val probability = anomaly.jitData?.comparisons?.maxOfOrNull { it.jitRelatedProbability } ?: 0.0
+                val probPercent = String.format("%.0f", probability * 100)
+                "jit_prob${probPercent}pct"
             }
         }
 
