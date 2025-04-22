@@ -1,13 +1,15 @@
 package infrastructure.jvm
 
 class JITLoggingOptionsProvider {
+
+    // Все флаги актуальные для 17 версии jvm и могут меняться в зависимости от неё
     fun getJITLoggingOptions(jvmType: String): List<String> {
         return when (jvmType) {
             "HotSpotJvmExecutor" -> listOf(
                 "-XX:+UnlockDiagnosticVMOptions",
                 "-XX:+PrintCompilation",
                 "-XX:+PrintInlining",
-                // "-XX:+TraceDeoptimization",
+//                "-XX:+TraceDeoptimization", // Only in develop build
                 // Опционально для еще более подробного анализа
                 // "-XX:+LogCompilation", "-XX:LogFile=jit-log.xml"
             )
@@ -18,7 +20,10 @@ class JITLoggingOptionsProvider {
 
             "GraalVmExecutor" -> listOf(
                 "-XX:+UnlockDiagnosticVMOptions",
-                "-XX:+PrintCompilation"
+                "-Dgraal.PrintCompilation=true",
+                "-Dgraal.TraceInlining=true",
+                "-Dgraal.TraceDeoptimization=true",
+//                "-Dgraal.DetailedMethodMetrics=true" // not supported in jvm 17
             )
 
             "AxiomJvmExecutor" -> listOf(

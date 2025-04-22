@@ -59,7 +59,8 @@ abstract class AbstractJvmExecutor(protected val jvmPath: String) : JvmExecutor 
             JvmExecutionResult(
                 exitCode = exitCode,
                 stdout = stdoutThread.output.toString(),
-                stderr = stderrThread.output.toString()
+                stderr = stderrThread.output.toString(),
+                timedOut = false
             )
         } catch (e: Exception) {
             throw JvmExecutionException("Ошибка выполнения JVM: ${e.message}", e)

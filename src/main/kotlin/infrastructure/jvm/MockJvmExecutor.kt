@@ -28,6 +28,6 @@ class MockJvmExecutor : JvmExecutor {
         val exitCode = 0  // Симулируем успешное завершение
 
         // Возвращаем мок-результат
-        return JvmExecutionResult(exitCode, stdout, stderr)
+        return JvmExecutionResult(exitCode, stdout, stderr, false)
     }
 }

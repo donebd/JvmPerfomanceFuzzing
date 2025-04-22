@@ -122,9 +122,7 @@ class DetailedMeasurementAnomalyVerifier(
     ): Int {
         logStartSeedVerification(purpose)
 
-        val enhancedOptions = prepareJvmOptionsWithJitLogging(jvmExecutors, jvmOptions)
-
-        val detailedMetrics = performDetailedMeasurements(seed, jvmExecutors, enhancedOptions)
+        val detailedMetrics = performDetailedMeasurements(seed, jvmExecutors, jvmOptions)
         val metricsMap = detailedMetrics.toMap()
 
         val significanceLevel = getSignificanceLevelForPurpose(purpose)
@@ -155,19 +153,6 @@ class DetailedMeasurementAnomalyVerifier(
         iterationsSinceLastCheck = 0
     }
 
-    private fun prepareJvmOptionsWithJitLogging(
-        jvmExecutors: List<JvmExecutor>,
-        baseOptions: List<String>
-    ): List<String> {
-        return if (jitAnalyzer != null) {
-            baseOptions + jvmExecutors.flatMap {
-                jitAnalyzer.jitOptionsProvider.getJITLoggingOptions(it::class.simpleName ?: "")
-            }
-        } else {
-            baseOptions
-        }
-    }
-
     private fun getSignificanceLevelForPurpose(purpose: VerificationPurpose): SignificanceLevel {
         return when (purpose) {
             VerificationPurpose.SEED_VERIFICATION -> SignificanceLevel.SEED_EVOLUTION
@@ -193,13 +178,20 @@ class DetailedMeasurementAnomalyVerifier(
         }
 
         return jvmExecutors.map { executor ->
+            val jvmSpecificOptions = if (jitAnalyzer != null) {
+                val jvmType = executor::class.simpleName ?: ""
+                jvmOptions + jitAnalyzer.jitOptionsProvider.getJITLoggingOptions(jvmType)
+            } else {
+                jvmOptions
+            }
+
             val metrics = performanceMeasurer.measure(
                 executor,
                 MUTATIONS_DIR,
                 bytecodeEntry.packageName,
                 bytecodeEntry.className,
                 false,
-                jvmOptions
+                jvmSpecificOptions
             )
             executor to metrics
         }
