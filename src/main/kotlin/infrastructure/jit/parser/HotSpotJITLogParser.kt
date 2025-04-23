@@ -6,9 +6,10 @@ import infrastructure.jit.model.JITProfile
 class HotSpotJITLogParser : JITLogParser {
 
     companion object {
-        private val COMPILATION_REGEX = """(\d+)([! ]) ([\w\.$]+)::([\w<>]+)(?:\(([\w\.,]+)\))?(?:\s@\s(\d+))? \((\d+) bytes\)""".toRegex()
-        private val INLINING_REGEX = """^\s+\@\s+\d+\s+(.+?)::(.+?)\s+.*?(?:inline|intrinsic)""".toRegex(RegexOption.MULTILINE)
+        private val COMPILATION_REGEX = """(\d+)\s+(\d+)([! ]?)\s+(\d+)\s+([\w\.$]+)::([\w<>]+).*?\((\d+) bytes\)""".toRegex()
+        private val INLINING_REGEX = """^\s+\@\s+\d+\s+([\w\.$]+)::([\w<>]+).*?(?:inline|intrinsic)""".toRegex(RegexOption.MULTILINE)
         private val COMPILATION_TIME_REGEX = """compile time\s+(\d+)ms""".toRegex()
+        private val DEOPT_NOT_ENTRANT_REGEX = """([\w\.$]+)::([\w<>]+).*made not entrant""".toRegex()
     }
 
     override fun parseCompilationLogs(stdout: String, stderr: String): JITProfile {
@@ -29,20 +30,16 @@ class HotSpotJITLogParser : JITLogParser {
 
     private fun parseCompilationEvents(logLines: List<String>): List<JITCompilationEvent> {
         val events = mutableListOf<JITCompilationEvent>()
-        var deoptCount = 0
 
         for (line in logLines) {
-            if (!line.contains("CompilerThread")) continue
-
             val match = COMPILATION_REGEX.find(line) ?: continue
 
             val isDeopt = match.groupValues[2] == "!"
-            if (isDeopt) deoptCount++
 
-            val className = match.groupValues[3]
-            val methodName = match.groupValues[4]
-            val signature = match.groupValues[5]
-            val compileLevel = match.groupValues[6].toIntOrNull() ?: 1
+            val className = match.groupValues[5]
+            val methodName = match.groupValues[6]
+            val signature = null
+            val compileLevel = match.groupValues[4].toIntOrNull() ?: 1
             val bytecodeSize = match.groupValues[7].toIntOrNull() ?: -1
 
             events.add(JITCompilationEvent(
@@ -55,6 +52,22 @@ class HotSpotJITLogParser : JITLogParser {
                 deoptimization = isDeopt
             ))
         }
+
+        for (line in logLines) {
+            val deoptMatch = DEOPT_NOT_ENTRANT_REGEX.find(line)
+            if (deoptMatch != null) {
+                val dClassName = deoptMatch.groupValues[1]
+                val dMethodName = deoptMatch.groupValues[2]
+                val methodKey = "$dClassName.$dMethodName"
+
+                // Найти метод и отметить как деоптимизированный
+                val index = events.indexOfFirst { it.methodName == methodKey }
+                if (index >= 0) {
+                    events[index] = events[index].copy(deoptimization = true)
+                }
+            }
+        }
+
 
         return events
     }
@@ -73,8 +86,8 @@ class HotSpotJITLogParser : JITLogParser {
             // Проверяем, не начался ли новый метод
             val compileMatch = COMPILATION_REGEX.find(line)
             if (compileMatch != null) {
-                val className = compileMatch.groupValues[3]
-                val methodName = compileMatch.groupValues[4]
+                val className = compileMatch.groupValues[5]
+                val methodName = compileMatch.groupValues[6]
                 currentMethod = "$className.$methodName"
                 continue
             }
