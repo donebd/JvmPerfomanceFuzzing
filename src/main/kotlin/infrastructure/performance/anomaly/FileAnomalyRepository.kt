@@ -63,22 +63,28 @@ class FileAnomalyRepository(
         seed.anomalies.forEachIndexed { index, anomalyGroup ->
             val filePrefix = generateFilePrefix(anomalyGroup, index, timestamp)
             val anomalyFile = File(anomaliesDir, "anomaly_${filePrefix}.json")
-            anomalyFile.writeText(objectMapper.writeValueAsString(anomalyGroup))
+            if (anomalyGroup.anomalyType == AnomalyGroupType.JIT) {
+                anomalyFile.writeText(objectMapper.writeValueAsString(anomalyGroup))
+            } else {
+                val anomalyWithoutJitData = anomalyGroup.copy(jitData = null)
+                anomalyFile.writeText(objectMapper.writeValueAsString(anomalyWithoutJitData))
+            }
         }
 
-        seed.anomalies.forEachIndexed { index, anomalyGroup ->
-            if (anomalyGroup.jitData != null) {
+        seed.anomalies
+            .filter { it.jitData != null }
+            .distinctBy { it.jitData.hashCode() }
+            .forEachIndexed { index, anomalyGroup ->
                 val jitDir = File(anomaliesDir, "jit_analysis")
                 jitDir.mkdirs()
 
                 // Используем генератор отчета
-                val report = jitReportGenerator.generateMarkdownReport(anomalyGroup.jitData)
+                val report = jitReportGenerator.generateMarkdownReport(anomalyGroup.jitData!!)
                 File(jitDir, "jit_report_$index.md").writeText(report)
 
                 val detailsFile = File(jitDir, "jit_details_$index.json")
                 detailsFile.writeText(objectMapper.writeValueAsString(anomalyGroup.jitData))
             }
-        }
 
         println("Сохранено ${seed.anomalies.size} аномалий для сида ${seed.description} в ${seedDir.absolutePath}")
     }
