@@ -131,7 +131,7 @@ class DetailedMeasurementAnomalyVerifier(
         )
 
         val previousInterestingness = seed.interestingness
-        val newInterestingness = calculateNewInterestingness(confirmedAnomalies, previousInterestingness)
+        val newInterestingness = calculateNewInterestingness(seed.anomalies, confirmedAnomalies, previousInterestingness)
 
         seed.updateWithVerificationResults(confirmedAnomalies, newInterestingness)
 
@@ -225,6 +225,7 @@ class DetailedMeasurementAnomalyVerifier(
     }
 
     private fun calculateNewInterestingness(
+        unconfirmedAnomalies: List<PerformanceAnomalyGroup>,
         confirmedAnomalies: List<PerformanceAnomalyGroup>,
         previousInterestingness: Double
     ): Double {
@@ -233,11 +234,14 @@ class DetailedMeasurementAnomalyVerifier(
         ) {
             performanceAnalyzer.calculateOverallInterestingness(confirmedAnomalies)
         } else {
+            if (unconfirmedAnomalies.map { it.anomalyType }.contains(AnomalyGroupType.MEMORY) ) {
+                return 0.01 // False cause of OS IO operations
+            }
             val reductionFactor = when {
                 previousInterestingness > 1000000 -> 10000.0
                 previousInterestingness > 100000 -> 5000.0
                 previousInterestingness > 10000 -> 200.0
-                previousInterestingness > 1000 -> 100.0
+                previousInterestingness > 1000 -> 10.0
                 else -> INTEREST_REDUCTION_FACTOR
             }
             previousInterestingness / reductionFactor
