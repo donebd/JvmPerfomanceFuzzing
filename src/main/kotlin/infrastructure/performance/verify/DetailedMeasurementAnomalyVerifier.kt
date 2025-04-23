@@ -233,7 +233,14 @@ class DetailedMeasurementAnomalyVerifier(
         ) {
             performanceAnalyzer.calculateOverallInterestingness(confirmedAnomalies)
         } else {
-            previousInterestingness / INTEREST_REDUCTION_FACTOR
+            val reductionFactor = when {
+                previousInterestingness > 1000000 -> 10000.0
+                previousInterestingness > 100000 -> 5000.0
+                previousInterestingness > 10000 -> 200.0
+                previousInterestingness > 1000 -> 100.0
+                else -> INTEREST_REDUCTION_FACTOR
+            }
+            previousInterestingness / reductionFactor
         }
     }
 
@@ -245,7 +252,7 @@ class DetailedMeasurementAnomalyVerifier(
         newInterestingness: Double
     ): Int {
         if (confirmedAnomalies.isNotEmpty()) {
-            logSuccessfulVerification(confirmedAnomalies, purpose, newInterestingness)
+            logSuccessfulVerification(seed, confirmedAnomalies, purpose, newInterestingness)
 
             if (purpose == VerificationPurpose.REPORTING) {
                 anomalyRepository.saveSeedAnomalies(seed)
@@ -253,7 +260,7 @@ class DetailedMeasurementAnomalyVerifier(
 
             return confirmedAnomalies.size
         } else {
-            logFailedVerification(purpose, previousInterestingness, newInterestingness)
+            logFailedVerification(seed, purpose, previousInterestingness, newInterestingness)
             return 0
         }
     }
@@ -273,6 +280,7 @@ class DetailedMeasurementAnomalyVerifier(
     }
 
     private fun logSuccessfulVerification(
+        seed: Seed,
         confirmedAnomalies: List<PerformanceAnomalyGroup>,
         purpose: VerificationPurpose,
         newInterestingness: Double
@@ -283,12 +291,14 @@ class DetailedMeasurementAnomalyVerifier(
             """
             Аномалии подтверждены при точном измерении для ${purpose.name} 
             (всего: ${confirmedAnomalies.size}, ${anomalyCounts}). 
-            Интересность обновлена до $newInterestingness
+            Интересность обновлена до $newInterestingness.
+            Энергия сида обновлена до ${seed.energy}.
             """.trimIndent().replace("\n", " ")
         )
     }
 
     private fun logFailedVerification(
+        seed: Seed,
         purpose: VerificationPurpose,
         previousInterestingness: Double,
         newInterestingness: Double
@@ -297,6 +307,7 @@ class DetailedMeasurementAnomalyVerifier(
             """
             Аномалии не подтвердились при точном измерении для ${purpose.name}.
             Интересность уменьшена с $previousInterestingness до $newInterestingness.
+            Энергия сида уменьшена до ${seed.energy}.
             """.trimIndent().replace("\n", " ")
         )
     }

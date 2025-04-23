@@ -14,7 +14,6 @@ import infrastructure.performance.verify.VerificationPurpose
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.entity.SignificanceLevel
 import java.io.File
-import kotlin.math.max
 
 class EvolutionaryFuzzer(
     private val mutator: Mutator,
@@ -112,8 +111,6 @@ class EvolutionaryFuzzer(
                     jitInterestingness
                 }
 
-                val newSeedEnergy = calculateEnergy(overallInterestingness)
-
                 val mutationRecord = (mutator as? AdaptiveMutator)?.getLastMutationRecord()?.copy(
                     parentSeedDescription = selectedSeed.description
                 )
@@ -127,10 +124,9 @@ class EvolutionaryFuzzer(
                 val newSeed = Seed(
                     bytecodeEntry = BytecodeEntry(mutatedBytecode, className, packageName),
                     mutationHistory = newMutationHistory,
-                    energy = newSeedEnergy,
-                    interestingness = overallInterestingness,
                     anomalies = performanceAnomalies,
-                    iteration = iterations
+                    iteration = iterations,
+                    interestingness = overallInterestingness
                 )
 
                 val wasAdded = seedManager.addSeed(newSeed)
@@ -157,7 +153,7 @@ class EvolutionaryFuzzer(
 
                     println(
                         "Найдены аномалии: $perfInfo$separator$jitInfo! " +
-                                "Добавлен новый сид: ${newSeed.description} с энергией $newSeedEnergy и интересностью $overallInterestingness"
+                                "Добавлен новый сид: ${newSeed.description} с энергией ${newSeed.energy} и интересностью $overallInterestingness"
                     )
 
                     iterationsWithoutNewSeeds = 0
@@ -194,13 +190,6 @@ class EvolutionaryFuzzer(
 
         println("Фаззинг завершен. Всего итераций: $iterations, найдено аномалий: $totalAnomaliesFound")
         println("Финальный размер пула сидов: ${seedManager.getSeedCount()}")
-    }
-
-    /**
-     * Определяет начальную энергию для нового сида на основе его интересности
-     */
-    private fun calculateEnergy(interestingness: Double): Int {
-        return max(initialEnergy, (interestingness / 10.0).toInt())
     }
 
     private fun writeMutatedBytecode(bytecode: ByteArray, outputFile: File) {

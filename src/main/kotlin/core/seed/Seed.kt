@@ -3,6 +3,7 @@ package core.seed
 import core.mutation.MutationRecord
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
+import kotlin.math.max
 
 /**
  * Класс, представляющий сид для фаззинга
@@ -21,7 +22,6 @@ data class Seed(
     constructor(
         bytecodeEntry: BytecodeEntry,
         mutationHistory: List<MutationRecord> = emptyList(),
-        energy: Int,
         anomalies: List<PerformanceAnomalyGroup> = emptyList(),
         iteration: Int = 0,
         interestingness: Double = 0.0,
@@ -29,7 +29,7 @@ data class Seed(
     ) : this(
         bytecodeEntry,
         mutationHistory,
-        energy,
+        calculateEnergy(interestingness),
         generateSeedDescription(anomalies, iteration),
         interestingness,
         anomalies,
@@ -43,6 +43,7 @@ data class Seed(
     ) {
         this.anomalies = confirmedAnomalies
         this.interestingness = newInterestingness
+        this.energy = calculateEnergy(newInterestingness)
         this.verified = confirmedAnomalies.isNotEmpty()
         this.description = generateSeedDescription(anomalies, iteration)
     }
@@ -61,6 +62,12 @@ data class Seed(
     }
 
     companion object {
+        private const val  INITIAL_ENERGY = 10
+
+        fun calculateEnergy(interestingness: Double): Int {
+            return max(INITIAL_ENERGY, (interestingness / 10.0).toInt())
+        }
+
         fun generateSeedDescription(
             anomalies: List<PerformanceAnomalyGroup>,
             iteration: Int
