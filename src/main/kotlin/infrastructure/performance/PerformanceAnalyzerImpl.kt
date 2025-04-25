@@ -29,16 +29,16 @@ class PerformanceAnalyzerImpl(
     companion object {
         // Константы для анализа JIT-аномалий
         private const val JIT_ANOMALY_PROBABILITY_THRESHOLD = 0.3
-        private const val JIT_RELATED_PROBABILITY_WEIGHT = 30.0
-        private const val JIT_UNIQUE_METHODS_WEIGHT = 2.0
-        private const val JIT_UNIQUE_METHODS_MAX = 20.0
-        private const val JIT_DEOPT_DIFFERENCE_BONUS = 15.0
-        private const val JIT_HOT_METHODS_BONUS = 20.0
+        private const val JIT_RELATED_PROBABILITY_WEIGHT = 3.0
+        private const val JIT_UNIQUE_METHODS_WEIGHT = 1.0
+        private const val JIT_UNIQUE_METHODS_MAX = 10.0
+        private const val JIT_DEOPT_DIFFERENCE_BONUS = 1.0
+        private const val JIT_HOT_METHODS_BONUS = 5.0
 
         // Константы для анализа обычных аномалий
         private const val TIMEOUT_DEVIATION = 100.0
-        private const val TIMEOUT_INTERESTINGNESS_WEIGHT = 50.0
-        private const val ERROR_INTERESTINGNESS_WEIGHT = 30.0
+        private const val TIMEOUT_INTERESTINGNESS_WEIGHT = 25.0
+        private const val ERROR_INTERESTINGNESS_WEIGHT = 10.0
     }
 
     /**
