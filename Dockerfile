@@ -5,6 +5,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean
 
 # HotSpot уже включен в базовый образ
+# Если нужна конкретная версия HotSpot, раскомментируйте и настройте блок ниже:
+# RUN wget -q https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_linux-x64_bin.tar.gz \
+#     && mkdir -p /opt/hotspot \
+#     && tar -xzf openjdk-17.0.2_linux-x64_bin.tar.gz -C /opt/hotspot --strip-components=1 \
+#     && rm openjdk-17.0.2_linux-x64_bin.tar.gz
 
 # GraalVM
 RUN wget -q https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz \
@@ -15,7 +20,7 @@ RUN wget -q https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-1
     && rm graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz \
     && /opt/graalvm/bin/gu install native-image
 
-# OpenJ9 - раскомментируем и обновим до актуальной версии
+# OpenJ9
 RUN wget -q https://github.com/ibmruntimes/semeru17-binaries/releases/download/jdk-17.0.14%2B7_openj9-0.49.0/ibm-semeru-open-jdk_x64_linux_17.0.14_7_openj9-0.49.0.tar.gz \
     && mkdir -p /opt/openj9 \
     && tar -xzf ibm-semeru-open-jdk_x64_linux_17.0.14_7_openj9-0.49.0.tar.gz -C /opt \
@@ -23,11 +28,17 @@ RUN wget -q https://github.com/ibmruntimes/semeru17-binaries/releases/download/j
     && rm -rf /opt/jdk-17.0.14+7 \
     && rm ibm-semeru-open-jdk_x64_linux_17.0.14_7_openj9-0.49.0.tar.gz
 
-# Опционально: Добавляем Axiom JVM, если она вам нужна
-# RUN wget -q https://url-to-axiom-jvm/axiom-jdk-17.tar.gz \
-#     && mkdir -p /opt/axiom \
-#     && tar -xzf axiom-jdk-17.tar.gz -C /opt/axiom --strip-components=1 \
-#     && rm axiom-jdk-17.tar.gz
+# AxiomJDK (пока не доступно в докере из-за ограничений лицензии)
+# ВАРИАНТ 1: Если у вас есть .deb пакет локально
+# Поместите axiomjdk-jdk17.0.15+10-linux-amd64.deb в корень проекта
+# COPY axiomjdk-jdk17.0.15+10-linux-amd64.deb /tmp/
+# RUN apt-get update && apt-get install -y /tmp/axiomjdk-jdk17.0.15+10-linux-amd64.deb \
+#     && rm /tmp/axiomjdk-jdk17.0.15+10-linux-amd64.deb
+
+# ВАРИАНТ 2: Если у вас есть URL для скачивания
+# RUN wget -q URL_К_ВАШЕМУ_ПАКЕТУ/axiomjdk-jdk17.0.15+10-linux-amd64.deb -O /tmp/axiomjdk.deb \
+#     && apt-get update && apt-get install -y /tmp/axiomjdk.deb \
+#     && rm /tmp/axiomjdk.deb
 
 # Gradle
 RUN wget -q https://services.gradle.org/distributions/gradle-7.6-bin.zip \
@@ -39,7 +50,7 @@ RUN wget -q https://services.gradle.org/distributions/gradle-7.6-bin.zip \
 ENV JAVA_HOTSPOT=/usr/local/openjdk-17
 ENV JAVA_OPENJ9=/opt/openj9
 ENV JAVA_GRAALVM=/opt/graalvm
-# ENV JAVA_AXIOM=/opt/axiom
+ENV JAVA_AXIOM=/usr/lib/jvm/axiomjdk-java17-amd64/bin/java
 
 WORKDIR /app
 COPY . /app
@@ -49,7 +60,8 @@ RUN mkdir -p /app/src/main/resources/
 RUN echo '{ \
   "HotSpotJvm": "/usr/local/openjdk-17/bin/java", \
   "OpenJ9Jvm": "/opt/openj9/bin/java", \
-  "GraalVmJvm": "/opt/graalvm/bin/java" \
+  "GraalVmJvm": "/opt/graalvm/bin/java", \
+  "AxiomJvm": "/usr/lib/jvm/axiomjdk-java17-amd64/bin/java" \
 }' > /app/src/main/resources/jvm_config.json
 
 # Сборка проекта
@@ -58,6 +70,4 @@ RUN chmod +x ./gradlew && ./gradlew clean jar -x test
 # Создаём папку для результатов
 RUN mkdir -p /app/anomalies
 
-
-# Обновите имя JAR-файла в соответствии с вашим проектом
 ENTRYPOINT ["java", "-jar", "build/libs/JvmPerfomanceFuzzing-1.0.jar"]
