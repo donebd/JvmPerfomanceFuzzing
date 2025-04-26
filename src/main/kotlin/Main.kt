@@ -37,7 +37,11 @@ fun main() {
         BoxingUnboxingMutationStrategy(jimpleTranslator),
         ExceptionHandlingMutator(jimpleTranslator),
         InvertBranchConditionMutator(jimpleTranslator),
-        LookupSwitchMutator(jimpleTranslator)
+        LookupSwitchMutator(jimpleTranslator),
+        RedundantComputationMutator(jimpleTranslator),
+        RedundantNullCheckMutator(jimpleTranslator),
+        ConstantFoldingBlockerMutator(jimpleTranslator),
+        LoopDirectionReverserMutator(jimpleTranslator)
     )
 
     // Setup components

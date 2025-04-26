@@ -8,6 +8,10 @@ import infrastructure.performance.entity.PerformanceMetrics
 import java.io.File
 import javax.tools.ToolProvider
 
+/**
+ * Реализация измерителя производительности на базе JMH.
+ * Генерирует и компилирует JMH-бенчмарки, запускает их на разных JVM.
+ */
 class PerformanceMeasurerImpl : PerformanceMeasurer {
 
     companion object {
@@ -23,34 +27,16 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         quickMeasurement: Boolean,
         jvmOptionsProvider: (JvmExecutor) -> List<String>
     ): List<Pair<JvmExecutor, PerformanceMetrics>> {
-        if (!classpath.exists() || !classpath.isDirectory) {
-            throw IllegalArgumentException("Указанный classpath '${classpath.absolutePath}' не существует или не является директорией")
-        }
+        validateClassPath(classpath)
 
-        val benchmarkDir = File(classpath, packageName)
-        val benchmarkFile = File(benchmarkDir, "$BENCHMARK_CLASS_NAME.java")
-        val jsonResultFolder = File(classpath, "results")
-        if (!jsonResultFolder.exists()) {
-            jsonResultFolder.mkdirs()
-        }
-
-        val jmhConfig = if (quickMeasurement) {
-            JmhOptions()
-        } else {
-            JmhOptions(5, 5, 5, 10)
-        }
-
-        val jsonResultFileName = "$className-${System.currentTimeMillis()}-result.json"
-        val jsonResultFile = File(jsonResultFolder, jsonResultFileName)
-
-        benchmarkFile.writeText(generateJMHBenchmark(jmhConfig, className, jsonResultFile.absolutePath, packageName))
-        compileBenchmarkClass(classpath, benchmarkFile)
+        val jmhConfig = if (quickMeasurement) JmhOptions() else JmhOptions(5, 5, 5, 10)
+        val benchmarkFile = prepareBenchmarkFile(classpath, packageName, className, jmhConfig)
+        val jmhClasspath = getJmhClasspath()
 
         return executors.map { executor ->
             val jvmOptions = jvmOptionsProvider(executor)
             val jvmName = executor::class.simpleName ?: "unknown"
 
-            val jmhClasspath = getJmhClasspath()
             val fullClasspath = "${classpath.absolutePath}:$jmhClasspath"
             val relativeBenchmarkPath = "$packageName.$BENCHMARK_CLASS_NAME"
 
@@ -63,7 +49,7 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
                 jvmOptions
             )
 
-            executor to parseJMHResults(jmhResult, jsonResultFile, jvmName)
+            executor to parseJMHResults(jmhResult, benchmarkFile.resultFile, jvmName)
         }
     }
 
@@ -75,55 +61,72 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         jmhOptions: JmhOptions,
         jvmOptions: List<String>
     ): PerformanceMetrics {
+        validateClassPath(classpath)
+
+        val benchmarkFile = prepareBenchmarkFile(classpath, packageName, className, jmhOptions)
+        val jmhClasspath = getJmhClasspath()
+
+        val fullClasspath = "${classpath.absolutePath}:$jmhClasspath"
+        val relativeBenchmarkPath = "$packageName.$BENCHMARK_CLASS_NAME"
+
+        val jmhResult = executor.execute(
+            classpath,
+            fullClasspath,
+            relativeBenchmarkPath,
+            emptyList(),
+            jmhOptions.executionTimeout,
+            jvmOptions
+        )
+
+        return parseJMHResults(jmhResult, benchmarkFile.resultFile, executor::class.simpleName ?: "unknown")
+    }
+
+    private fun validateClassPath(classpath: File) {
         if (!classpath.exists() || !classpath.isDirectory) {
             throw IllegalArgumentException("Указанный classpath '${classpath.absolutePath}' не существует или не является директорией")
         }
+    }
 
-        // Генерируем JMH-класс
+    private data class BenchmarkFiles(val sourceFile: File, val resultFile: File)
+
+    private fun prepareBenchmarkFile(
+        classpath: File,
+        packageName: String,
+        className: String,
+        jmhOptions: JmhOptions
+    ): BenchmarkFiles {
         val benchmarkDir = File(classpath, packageName)
         val benchmarkFile = File(benchmarkDir, "$BENCHMARK_CLASS_NAME.java")
-        val jsonResultFileName = "$className-${System.currentTimeMillis()}-result.json"
-        val jsonResultFolder = File(classpath, "results")
-        if (!jsonResultFolder.exists()) {
-            jsonResultFolder.mkdirs()
+
+        val jsonResultFolder = File(classpath, "results").apply {
+            if (!exists()) mkdirs()
         }
+
+        val jsonResultFileName = "$className-${System.currentTimeMillis()}-result.json"
         val jsonResultFile = File(jsonResultFolder, jsonResultFileName)
 
         benchmarkFile.writeText(generateJMHBenchmark(jmhOptions, className, jsonResultFile.absolutePath, packageName))
         compileBenchmarkClass(classpath, benchmarkFile)
 
-        val jmhClasspath = getJmhClasspath()
-        val fullClasspath = "${classpath.absolutePath}:$jmhClasspath"
-        val relativeBenchmarkPath = "$packageName.$BENCHMARK_CLASS_NAME"
-        val mainArgs = emptyList<String>()
-        val jmhResult = executor.execute(classpath, fullClasspath, relativeBenchmarkPath, mainArgs, jmhOptions.executionTimeout, jvmOptions)
-
-        // Парсим результаты JMH
-        return parseJMHResults(jmhResult, jsonResultFile, executor::class.simpleName ?: "unknown")
+        return BenchmarkFiles(benchmarkFile, jsonResultFile)
     }
 
-    /**
-     * Компиляция бенчмарка с classpath
-     */
     private fun compileBenchmarkClass(classpath: File, benchmarkFile: File) {
         val compiler = ToolProvider.getSystemJavaCompiler()
         val fileManager = compiler.getStandardFileManager(null, null, null)
 
-        val sources = listOf(benchmarkFile)
-        val compilationUnits = fileManager.getJavaFileObjectsFromFiles(sources)
+        fileManager.use { manager ->
+            val compilationUnits = manager.getJavaFileObjectsFromFiles(listOf(benchmarkFile))
+            val compileClasspath = "${classpath.absolutePath}:${getJmhClasspath()}"
+            val options = listOf("-d", classpath.absolutePath, "-cp", compileClasspath)
 
-        val compileClasspath = "${classpath.absolutePath}:${getJmhClasspath()}"
+            val task = compiler.getTask(null, manager, null, options, null, compilationUnits)
 
-        val options = listOf("-d", classpath.absolutePath, "-cp", compileClasspath)
-        val task = compiler.getTask(null, fileManager, null, options, null, compilationUnits)
-
-        if (!task.call()) {
-            throw RuntimeException("Ошибка компиляции JMH-бенчмарка")
+            if (!task.call()) {
+                throw RuntimeException("Ошибка компиляции JMH-бенчмарка")
+            }
         }
-
-        fileManager.close()
     }
-
 
     private fun getJmhClasspath(): String {
         val gradleCache = File(System.getProperty("user.home"), ".gradle/caches/modules-2/files-2.1")
@@ -148,10 +151,12 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         return jmhJars.joinToString(File.pathSeparator)
     }
 
-    /**
-     * Генерирует код JMH-бенчмарка.
-     */
-    private fun generateJMHBenchmark(jmhOptions: JmhOptions, className: String, resultFileName: String, packageName: String): String {
+    private fun generateJMHBenchmark(
+        jmhOptions: JmhOptions,
+        className: String,
+        resultFileName: String,
+        packageName: String
+    ): String {
         return """
         package ${packageName};
 
@@ -219,57 +224,46 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
     """.trimIndent()
     }
 
-    /**
-     * Парсит результаты JMH и возвращает PerformanceMetrics.
-     */
-    private fun parseJMHResults(jmhResult: JvmExecutionResult, jsonResultFile: File, jvmName: String): PerformanceMetrics {
-        // Проверяем, завершился ли процесс по таймауту
+    private fun parseJMHResults(
+        jmhResult: JvmExecutionResult,
+        jsonResultFile: File,
+        jvmName: String
+    ): PerformanceMetrics {
         if (jmhResult.timedOut) {
-            return PerformanceMetrics(
-                avgTimeMs = -1.0,
-                avgMemoryUsageKb = -1L,
-                scoreError = 0.0,
-                minTimeMs = 0.0,
-                maxTimeMs = 0.0,
-                successfullyParsed = false,
-                jvmExecutionResult = jmhResult
-            )
+            return createTimedOutMetrics(jmhResult)
         }
 
-        var avgTimeMs = -1.0
-        var scoreError = 0.0
-        var minTimeMs = 0.0
-        var maxTimeMs = 0.0
-        var avgMemoryUsageKb = -1L
-        var successfullyParsed = false
-
-        if (jsonResultFile.exists()) {
-            try {
-                val objectMapper = jacksonObjectMapper()
-                val resultJson = objectMapper.readTree(jsonResultFile)
-
-                if (!resultJson.isEmpty && resultJson.first() != null) {
-                    val primaryMetric = resultJson.first()["primaryMetric"]
-                    avgTimeMs = primaryMetric["score"].asDouble()
-                    scoreError = primaryMetric["scoreError"].asDouble()
-                    minTimeMs = primaryMetric["scorePercentiles"]["0.0"].asDouble()
-                    maxTimeMs = primaryMetric["scorePercentiles"]["100.0"].asDouble()
-
-                    val memoryUsageRegex = Regex("""AVERAGE_MEMORY_USAGE_KB: (\d+)""")
-                    avgMemoryUsageKb = memoryUsageRegex.find(jmhResult.stdout)?.groupValues?.get(1)?.toLongOrNull() ?: -1L
-
-                    successfullyParsed = true
-                }
-                val jsonFilePathWithoutExtension = jsonResultFile.path.replace(".json", "")
-                jsonResultFile.renameTo(File(jsonFilePathWithoutExtension + "-${jvmName}.json"))
-            } catch (e: Exception) {
-                println("Ошибка парсинга результатов JMH: ${e.message}")
+        return try {
+            if (!jsonResultFile.exists()) {
+                return createFailedParsingMetrics(jmhResult)
             }
+
+            val metrics = parseResultFile(jsonResultFile, jmhResult)
+            renameResultFile(jsonResultFile, jvmName)
+
+            metrics
+        } catch (e: Exception) {
+            println("Ошибка парсинга результатов JMH: ${e.message}")
+            createFailedParsingMetrics(jmhResult)
+        }
+    }
+
+    private fun parseResultFile(jsonResultFile: File, jmhResult: JvmExecutionResult): PerformanceMetrics {
+        val objectMapper = jacksonObjectMapper()
+        val resultJson = objectMapper.readTree(jsonResultFile)
+
+        if (resultJson.isEmpty || resultJson.first() == null) {
+            return createFailedParsingMetrics(jmhResult)
         }
 
-        if (!successfullyParsed) {
-            jmhResult.exitCode = -100;
-        }
+        val primaryMetric = resultJson.first()["primaryMetric"]
+        val avgTimeMs = primaryMetric["score"].asDouble()
+        val scoreError = primaryMetric["scoreError"].asDouble()
+        val minTimeMs = primaryMetric["scorePercentiles"]["0.0"].asDouble()
+        val maxTimeMs = primaryMetric["scorePercentiles"]["100.0"].asDouble()
+
+        val memoryUsageRegex = Regex("""AVERAGE_MEMORY_USAGE_KB: (\d+)""")
+        val avgMemoryUsageKb = memoryUsageRegex.find(jmhResult.stdout)?.groupValues?.get(1)?.toLongOrNull() ?: -1L
 
         return PerformanceMetrics(
             avgTimeMs = avgTimeMs,
@@ -277,10 +271,38 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
             scoreError = scoreError,
             minTimeMs = minTimeMs,
             maxTimeMs = maxTimeMs,
-            successfullyParsed = successfullyParsed,
+            successfullyParsed = true,
             jvmExecutionResult = jmhResult
         )
     }
 
+    private fun renameResultFile(jsonResultFile: File, jvmName: String) {
+        val jsonFilePathWithoutExtension = jsonResultFile.path.replace(".json", "")
+        jsonResultFile.renameTo(File("$jsonFilePathWithoutExtension-$jvmName.json"))
+    }
 
+    private fun createTimedOutMetrics(jmhResult: JvmExecutionResult): PerformanceMetrics {
+        return PerformanceMetrics(
+            avgTimeMs = -1.0,
+            avgMemoryUsageKb = -1L,
+            scoreError = 0.0,
+            minTimeMs = 0.0,
+            maxTimeMs = 0.0,
+            successfullyParsed = false,
+            jvmExecutionResult = jmhResult
+        )
+    }
+
+    private fun createFailedParsingMetrics(jmhResult: JvmExecutionResult): PerformanceMetrics {
+        val result = jmhResult.copy(exitCode = -100)
+        return PerformanceMetrics(
+            avgTimeMs = -1.0,
+            avgMemoryUsageKb = -1L,
+            scoreError = 0.0,
+            minTimeMs = 0.0,
+            maxTimeMs = 0.0,
+            successfullyParsed = false,
+            jvmExecutionResult = result
+        )
+    }
 }

@@ -6,7 +6,8 @@ import infrastructure.performance.anomaly.PerformanceAnomalyGroup
 import kotlin.math.max
 
 /**
- * Класс, представляющий сид для фаззинга
+ * Представляет единичный сид для фаззинга.
+ * Хранит байткод, историю мутаций, метрики и подтвержденные аномалии.
  */
 data class Seed(
     val bytecodeEntry: BytecodeEntry,
@@ -41,19 +42,16 @@ data class Seed(
         confirmedAnomalies: List<PerformanceAnomalyGroup>,
         newInterestingness: Double
     ) {
-        this.anomalies = confirmedAnomalies
-        this.interestingness = newInterestingness
-        this.energy = calculateEnergy(newInterestingness)
-        this.verified = confirmedAnomalies.isNotEmpty()
-        this.description = generateSeedDescription(anomalies, iteration)
+        anomalies = confirmedAnomalies
+        interestingness = newInterestingness
+        energy = calculateEnergy(newInterestingness)
+        verified = confirmedAnomalies.isNotEmpty()
+        description = generateSeedDescription(anomalies, iteration)
     }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-
-        other as Seed
-
+        if (other !is Seed) return false
         return bytecodeEntry.bytecode.contentEquals(other.bytecodeEntry.bytecode)
     }
 
@@ -62,7 +60,8 @@ data class Seed(
     }
 
     companion object {
-        private const val  INITIAL_ENERGY = 10
+        private const val INITIAL_ENERGY = 10
+
 
         fun calculateEnergy(interestingness: Double): Int {
             return max(INITIAL_ENERGY, (interestingness / 10.0).toInt())
@@ -72,27 +71,21 @@ data class Seed(
             anomalies: List<PerformanceAnomalyGroup>,
             iteration: Int
         ): String {
-            // Формируем описание на основе типов аномалий и максимального отклонения
-            val anomalyTypes = anomalies.map { it.anomalyType }.distinct().joinToString("_")
+            val types = anomalies.map { it.anomalyType }.distinct().joinToString("_")
 
-            // Находим максимальное отклонение среди всех аномалий
             val maxDeviation = anomalies
                 .filter { it.anomalyType in listOf(AnomalyGroupType.TIME, AnomalyGroupType.MEMORY) }
                 .maxOfOrNull { it.maxDeviation }
                 ?.toInt() ?: 0
 
-            // Добавляем информацию о таймаутах и ошибках, если они есть
-            val hasTimeout = anomalies.any { it.anomalyType == AnomalyGroupType.TIMEOUT }
-            val hasError = anomalies.any { it.anomalyType == AnomalyGroupType.ERROR }
+            val parts = buildList {
+                if (maxDeviation > 0) add("_dev${maxDeviation}pct")
+                if (anomalies.any { it.anomalyType == AnomalyGroupType.TIMEOUT }) add("_timeout")
+                if (anomalies.any { it.anomalyType == AnomalyGroupType.ERROR }) add("_error")
+                if (anomalies.any { it.anomalyType == AnomalyGroupType.JIT }) add("_jit")
+            }
 
-            val deviationPart = if (maxDeviation > 0) "_dev${maxDeviation}pct" else ""
-            val timeoutPart = if (hasTimeout) "_timeout" else ""
-            val errorPart = if (hasError) "_error" else ""
-
-            val hasJit = anomalies.any { it.anomalyType == AnomalyGroupType.JIT }
-            val jitPart = if (hasJit) "_jit" else ""
-
-            return "anomaly_${anomalyTypes}${deviationPart}${timeoutPart}${errorPart}${jitPart}_iter_${iteration}"
+            return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}"
         }
     }
 }

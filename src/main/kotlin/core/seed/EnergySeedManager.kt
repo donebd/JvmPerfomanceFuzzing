@@ -4,218 +4,59 @@ import java.util.*
 import kotlin.math.max
 
 /**
- * Реализация менеджера сидов с применением стратегии выбора по энергии и интересности
- * с поддержкой верифицированных сидов
+ * Менеджер сидов, реализующий энергетико-интересностную модель отбора.
+ *
+ * Управляет популяцией сидов, добавляет новые и начальные сиды, регулирует энергию,
+ * восстанавливает полезные сиды и удаляет неэффективные при переполнении пула.
  */
 class EnergySeedManager(
     private val maxPoolSize: Int = 100,
-    private val minEnergyThreshold: Int = 3,   // Порог для восстановления энергии
-    private val energyBoost: Int = 5           // Насколько пополнять энергию
+    private val minEnergyThreshold: Int = 3,
+    private val energyBoost: Int = 5
 ) : SeedManager {
+
     private val seedPool = mutableSetOf<Seed>()
-    private val random = Random()
     private val initialSeeds = mutableListOf<Seed>()
+    private val random = Random()
 
     private val minActiveSeedsThreshold: Int
         get() = initialSeeds.size
 
     override fun addInitialSeeds(seeds: List<Seed>): Int {
-        var addedCount = 0
-
-        for (seed in seeds) {
-            initialSeeds.add(seed.copy())
-            if (addSeed(seed)) {
-                addedCount++
-            }
+        return seeds.count {
+            initialSeeds.add(it.copy())
+            addSeed(it)
         }
-
-        return addedCount
     }
 
     override fun addSeed(seed: Seed): Boolean {
-        // Проверяем дубликаты по байткоду
-        val existingSeed = seedPool.find { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
-        if (existingSeed != null) {
-            return false
-        }
+        val isDuplicate = seedPool.any { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
+        if (isDuplicate) return false
 
         val added = seedPool.add(seed)
-
-        // Если пул переполнен, удаляем наименее ценные сиды
-        if (added && seedPool.size > maxPoolSize) {
-            pruneSeeds()
-        }
-
+        if (added && seedPool.size > maxPoolSize) prunePool()
         return added
     }
 
-    private fun pruneSeeds() {
-        // Находим сиды, которые не являются начальными и не верифицированы
-        val removeCandidates = seedPool
-            .filter { seed ->
-                !seed.verified && initialSeeds.none { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
-            }
-            .sortedBy { it.energy * (1.0 + it.interestingness) }
-
-        val numberOfSeedsToRemove = seedPool.size - maxPoolSize
-
-        // Если неверифицированных сидов недостаточно, придется удалить и некоторые верифицированные
-        if (removeCandidates.size < numberOfSeedsToRemove) {
-            // Добавляем верифицированные сиды, которые не являются начальными
-            val additionalCandidates = seedPool
-                .filter { seed ->
-                    seed.verified && initialSeeds.none { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
-                }
-                .sortedBy { it.energy * (1.0 + it.interestingness) }
-                .take(numberOfSeedsToRemove - removeCandidates.size)
-
-            // Удаляем сиды
-            (removeCandidates + additionalCandidates).forEach { seedToRemove ->
-                seedPool.remove(seedToRemove)
-                println(
-                    "Пул сидов переполнен: удален сид ${seedToRemove.description} " +
-                            "с энергией ${seedToRemove.energy}, интересностью ${seedToRemove.interestingness}, " +
-                            "верифицирован: ${seedToRemove.verified}"
-                )
-            }
-        } else {
-            // Удаляем только неверифицированные сиды
-            removeCandidates.take(numberOfSeedsToRemove).forEach { seedToRemove ->
-                seedPool.remove(seedToRemove)
-                println(
-                    "Пул сидов переполнен: удален сид ${seedToRemove.description} " +
-                            "с энергией ${seedToRemove.energy}, интересностью ${seedToRemove.interestingness}"
-                )
-            }
-        }
-    }
-
     override fun selectSeedForMutation(): Seed? {
-        val activeSeedsCount = seedPool.count { it.energy > 0 }
+        if (seedPool.none { it.energy > 0 }) boostSeedEnergy()
 
-        // Восстанавливаем энергию при недостатке активных сидов
-        if (activeSeedsCount < minActiveSeedsThreshold) {
-            boostSeedEnergy()
-        }
+        removeDeadSeeds()
 
-        // Удаляем неактивные сиды, кроме начальных и верифицированных
-        if (seedPool.count { it.energy > 0 } >= minActiveSeedsThreshold) {
-            seedPool.removeIf { seed ->
-                seed.energy <= 0 &&
-                        !seed.verified &&
-                        initialSeeds.none { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
-            }
-        }
-
-        // Восстанавливаем начальные сиды если пул пуст
-        if (seedPool.isEmpty() && initialSeeds.isNotEmpty()) {
-            for (initialSeed in initialSeeds) {
-                val seedCopy = initialSeed.copy().apply {
-                    energy = max(initialSeed.energy, energyBoost)
-                }
-                seedPool.add(seedCopy)
-                println(
-                    "Пул сидов пуст: добавлен начальный сид ${seedCopy.description} " +
-                            "с энергией ${seedCopy.energy}, верифицирован: ${seedCopy.verified}"
-                )
-            }
-        }
-
+        if (seedPool.isEmpty()) restoreInitialSeeds()
         if (seedPool.isEmpty()) return null
 
-        // Если общая энергия очень низкая, добавляем энергию всем сидам
-        val totalEnergy = seedPool.sumOf { it.energy }
-        if (totalEnergy < seedPool.size) {
+        if (seedPool.sumOf { it.energy } < seedPool.size) {
             seedPool.forEach { it.energy += energyBoost }
         }
 
         val activeSeeds = seedPool.filter { it.energy > 0 }
         if (activeSeeds.isEmpty()) return null
 
-        // С 10% вероятностью выбираем полностью случайный сид
-        val randomExplorationChance = 0.1
-        if (random.nextDouble() < randomExplorationChance) {
-            return activeSeeds.random()
-        }
-
-        // В остальных случаях используем взвешенный отбор с бонусом для верифицированных
-        val verificationBonus = 2.0  // Коэффициент увеличения вероятности для верифицированных сидов
-
-        // Создаём взвешенный список, где верифицированные сиды имеют больший вес, но не абсолютный приоритет
-        val weightedPool = activeSeeds.map { seed ->
-            seed to if (seed.verified) (seed.energy * verificationBonus).toInt() else seed.energy
-        }
-
-        val totalWeight = max(1, weightedPool.sumOf { it.second })
-        var randomPoint = random.nextInt(totalWeight)
-
-        for ((seed, weight) in weightedPool) {
-            randomPoint -= weight
-            if (randomPoint < 0) {
-                return seed
-            }
-        }
-
-        return seedPool.filter { it.energy > 0 }.randomOrNull()
-    }
-
-    private fun boostSeedEnergy() {
-        // Сначала восстанавливаем верифицированные сиды с низкой энергией
-        val verifiedLowEnergySeeds = seedPool.filter { it.verified && it.energy <= minEnergyThreshold }
-
-        // Определяем сколько еще сидов нужно восстановить
-        val additionalSeedsNeeded = minActiveSeedsThreshold - verifiedLowEnergySeeds.size
-
-        val seedsToBoost = if (additionalSeedsNeeded > 0) {
-            // Добавляем неверифицированные сиды с низкой энергией по интересности
-            val nonVerifiedLowEnergySeeds = seedPool
-                .filter { !it.verified && it.energy <= minEnergyThreshold }
-                .sortedByDescending { it.interestingness }
-                .take(additionalSeedsNeeded)
-
-            verifiedLowEnergySeeds + nonVerifiedLowEnergySeeds
+        return if (random.nextDouble() < 0.1) {
+            activeSeeds.random()
         } else {
-            verifiedLowEnergySeeds
-        }.toMutableList()
-
-        // Если все еще недостаточно сидов, добавляем на основе энергии
-        if (seedsToBoost.size < minActiveSeedsThreshold) {
-            val remainingNeeded = minActiveSeedsThreshold - seedsToBoost.size
-            val remainingSeeds = seedPool
-                .filter { seed -> !seedsToBoost.contains(seed) }
-                .sortedBy { it.energy }
-                .take(remainingNeeded)
-
-            seedsToBoost.addAll(remainingSeeds)
-        }
-
-        // Восстанавливаем энергию выбранным сидам
-        seedsToBoost.forEach {
-            it.energy += energyBoost
-            println("Восстановлена энергия сида ${it.description}: новое значение ${it.energy}, верифицирован: ${it.verified}")
-        }
-
-        // Обрабатываем начальные сиды
-        for (initialSeed in initialSeeds) {
-            if (initialSeed.energy < minEnergyThreshold) {
-                initialSeed.energy += energyBoost
-
-                // Ищем соответствующий сид в пуле
-                val existingSeed = seedPool.find {
-                    it.bytecodeEntry.bytecode.contentEquals(initialSeed.bytecodeEntry.bytecode)
-                }
-
-                if (existingSeed != null) {
-                    existingSeed.energy = initialSeed.energy
-                    // Обновляем статус верификации, если начальный сид верифицирован
-                    if (initialSeed.verified && !existingSeed.verified) {
-                        existingSeed.verified = true
-                    }
-                } else {
-                    seedPool.add(initialSeed.copy())
-                    println("Восстановлен начальный сид ${initialSeed.description} с энергией ${initialSeed.energy}, верифицирован: ${initialSeed.verified}")
-                }
-            }
+            selectWeightedByEnergy(activeSeeds)
         }
     }
 
@@ -226,4 +67,113 @@ class EnergySeedManager(
     }
 
     override fun getSeedCount(): Int = seedPool.size
+
+    // --------------------- Internal logic ---------------------
+
+    private fun prunePool() {
+        val toRemove = seedPool
+            .filterNot { it.verified || isInitial(it) }
+            .sortedBy { it.energy * (1.0 + it.interestingness) }
+            .take(seedPool.size - maxPoolSize)
+            .toMutableList()
+
+        if (toRemove.size < seedPool.size - maxPoolSize) {
+            val additional = seedPool
+                .filter { it.verified && !isInitial(it) }
+                .sortedBy { it.energy * (1.0 + it.interestingness) }
+                .take((seedPool.size - maxPoolSize) - toRemove.size)
+
+            toRemove.addAll(additional)
+        }
+
+        toRemove.forEach {
+            seedPool.remove(it)
+            println("Удален сид ${it.description}, энергия: ${it.energy}, интересность: ${it.interestingness}, верифицирован: ${it.verified}")
+        }
+    }
+
+    private fun boostSeedEnergy() {
+        val verifiedLow = seedPool.filter { it.verified && it.energy <= minEnergyThreshold }
+        val additionalNeeded = minActiveSeedsThreshold - verifiedLow.size
+
+        val nonVerifiedLow = if (additionalNeeded > 0) {
+            seedPool
+                .filter { !it.verified && it.energy <= minEnergyThreshold }
+                .sortedByDescending { it.interestingness }
+                .take(additionalNeeded)
+        } else emptyList()
+
+        val toBoost = (verifiedLow + nonVerifiedLow).toMutableSet()
+
+        if (toBoost.size < minActiveSeedsThreshold) {
+            val remainder = seedPool
+                .filterNot { it in toBoost }
+                .sortedBy { it.energy }
+                .take(minActiveSeedsThreshold - toBoost.size)
+
+            toBoost.addAll(remainder)
+        }
+
+        toBoost.forEach {
+            it.energy += energyBoost
+            println("Восстановлена энергия: ${it.description}, новая энергия: ${it.energy}, верифицирован: ${it.verified}")
+        }
+
+        boostInitialSeeds()
+    }
+
+    private fun boostInitialSeeds() {
+        for (initial in initialSeeds) {
+            if (initial.energy >= minEnergyThreshold) continue
+
+            initial.energy += energyBoost
+
+            val existing = seedPool.find { it.bytecodeEntry.bytecode.contentEquals(initial.bytecodeEntry.bytecode) }
+
+            if (existing != null) {
+                existing.energy = initial.energy
+                if (initial.verified && !existing.verified) existing.verified = true
+            } else {
+                seedPool.add(initial.copy())
+                println("Восстановлен начальный сид: ${initial.description}, энергия: ${initial.energy}, верифицирован: ${initial.verified}")
+            }
+        }
+    }
+
+    private fun restoreInitialSeeds() {
+        for (initial in initialSeeds) {
+            val restored = initial.copy().apply {
+                energy = max(initial.energy, energyBoost)
+            }
+            seedPool.add(restored)
+            println("Пул пуст: добавлен ${restored.description}, энергия: ${restored.energy}, верифицирован: ${restored.verified}")
+        }
+    }
+
+    private fun removeDeadSeeds() {
+        seedPool.removeIf { it.energy <= 0 && !it.verified && !isInitial(it) }
+    }
+
+    private fun isInitial(seed: Seed): Boolean {
+        return initialSeeds.any { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
+    }
+
+    private fun selectWeightedByEnergy(seeds: List<Seed>): Seed? {
+        val verificationBonus = 2.0
+
+        val weighted = seeds.map {
+            val weight = if (it.verified) (it.energy * verificationBonus).toInt() else it.energy
+            it to weight
+        }
+
+        val total = weighted.sumOf { it.second }.coerceAtLeast(1)
+        var point = random.nextInt(total)
+
+        for ((seed, weight) in weighted) {
+            point -= weight
+            if (point < 0) return seed
+        }
+
+        return seeds.randomOrNull()
+    }
 }
