@@ -177,24 +177,21 @@ class DetailedMeasurementAnomalyVerifier(
             return emptyList()
         }
 
-        return jvmExecutors.map { executor ->
-            val jvmSpecificOptions = if (jitAnalyzer != null) {
-                val jvmType = executor::class.simpleName ?: ""
-                jvmOptions + jitAnalyzer.jitOptionsProvider.getJITLoggingOptions(jvmType)
-            } else {
-                jvmOptions
+        return performanceMeasurer.measureAll(
+            jvmExecutors,
+            MUTATIONS_DIR,
+            bytecodeEntry.packageName,
+            bytecodeEntry.className,
+            false,
+            { executor ->
+                if (jitAnalyzer != null) {
+                    val jvmType = executor::class.simpleName ?: ""
+                    jvmOptions + jitAnalyzer.jitOptionsProvider.getJITLoggingOptions(jvmType)
+                } else {
+                    jvmOptions
+                }
             }
-
-            val metrics = performanceMeasurer.measure(
-                executor,
-                MUTATIONS_DIR,
-                bytecodeEntry.packageName,
-                bytecodeEntry.className,
-                false,
-                jvmSpecificOptions
-            )
-            executor to metrics
-        }
+        )
     }
 
     private fun prepareOutputClassFile(packageName: String, className: String): File {

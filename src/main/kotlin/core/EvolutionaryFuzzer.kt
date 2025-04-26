@@ -84,16 +84,20 @@ class EvolutionaryFuzzer(
             val outputClassFile = File(packageDir, "${className}.class")
             writeMutatedBytecode(mutatedBytecode, outputClassFile)
 
-            val metrics = jvmExecutors.map { executor ->
-                val jvmOptionsWithJIT = if (jitOptionsProvider != null) {
-                    jvmOptions + jitOptionsProvider.getJITLoggingOptions(executor::class.simpleName ?: "")
-                } else {
-                    jvmOptions
+            val metrics = performanceMeasurer.measureAll(
+                jvmExecutors,
+                classpath,
+                packageName,
+                className,
+                true,
+                { executor ->
+                    if (jitOptionsProvider != null) {
+                        jvmOptions + jitOptionsProvider.getJITLoggingOptions(executor::class.simpleName ?: "")
+                    } else {
+                        jvmOptions
+                    }
                 }
-                val metrics =
-                    performanceMeasurer.measure(executor, classpath, packageName, className, true, jvmOptionsWithJIT)
-                executor to metrics
-            }
+            )
 
             val (performanceAnomalies, jitResult) = performanceAnalyzer.analyzeWithJIT(
                 metrics, SignificanceLevel.SEED_EVOLUTION

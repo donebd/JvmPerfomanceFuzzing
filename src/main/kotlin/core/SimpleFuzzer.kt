@@ -38,10 +38,14 @@ class SimpleFuzzer(
             val outputClassFile = File(packageDir, "${className}.class")
             writeMutatedBytecode(mutatedBytecode, outputClassFile)
 
-            val metrics = jvmExecutors.map { executor ->
-                val metrics = performanceMeasurer.measure(executor, classpath, packageName, className, true, jvmOptions)
-                executor to metrics
-            }
+            val metrics = performanceMeasurer.measureAll(
+                jvmExecutors,
+                classpath,
+                packageName,
+                className,
+                true,
+                { _ -> jvmOptions }
+            )
 
             // Используем SIGNIFICANT для простого фаззера, так как нас интересуют явные аномалии
             val anomalies = performanceAnalyzer.analyze(metrics, SignificanceLevel.REPORTING)
