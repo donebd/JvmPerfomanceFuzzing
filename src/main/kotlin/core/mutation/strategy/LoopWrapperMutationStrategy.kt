@@ -6,336 +6,179 @@ import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
 import soot.Body
 import soot.IntType
+import soot.Local
+import soot.Unit
 import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
-import java.util.*
+import kotlin.random.Random
 
-/**
- * Стратегия мутации, которая оборачивает случайные блоки кода в случайные циклы.
- * Может генерировать "чистые" for-циклы или "бесконечные" циклы с break.
- */
-class LoopWrapperMutationStrategy(jimpleTranslator: JimpleTranslator) : MutationStrategy(jimpleTranslator) {
+class LoopWrapperMutationStrategy(
+    jimpleTranslator: JimpleTranslator
+) : MutationStrategy(jimpleTranslator) {
 
-    /**
-     * Применяет случайную мутацию к телу метода
-     */
     override fun applyMutation(body: Body) {
         val units = body.units
         if (units.isEmpty()) return
 
-        // Находим доступные блоки и операторы
-        val blockFinder = BlockFinder(body)
-        val blocks = blockFinder.findBlocks()
+        val blocks = BlockFinder(body).findBlocks()
+        val useInfiniteLoop = Random.nextBoolean()
 
-        // Случайно выбираем тип цикла
-        val useInfiniteLoop = Random().nextBoolean()
-
-        if (blocks.isNotEmpty() && Random().nextBoolean()) {
-            // Мутируем блок
-            val targetBlock = blocks.random()
-
-            if (useInfiniteLoop) {
-                wrapBlockInInfiniteLoop(body, targetBlock)
-            } else {
-                wrapBlockInCleanForLoop(body, targetBlock)
-            }
+        if (blocks.isNotEmpty() && Random.nextBoolean()) {
+            val block = blocks.random()
+            if (useInfiniteLoop) wrapBlockInInfiniteLoop(body, block)
+            else wrapBlockInForLoop(body, block)
         } else {
-            // Мутируем одиночный оператор
-            val validUnits = findValidStatements(body)
-            if (validUnits.isEmpty()) return
-
-            val targetUnit = validUnits.random()
-
-            if (useInfiniteLoop) {
-                wrapStatementInInfiniteLoop(body, targetUnit)
-            } else {
-                wrapStatementInCleanForLoop(body, targetUnit)
-            }
+            val statements = findValidStatements(body)
+            val target = statements.randomOrNull() ?: return
+            if (useInfiniteLoop) wrapStatementInInfiniteLoop(body, target)
+            else wrapStatementInForLoop(body, target)
         }
     }
 
-    /**
-     * Находит операторы, подходящие для мутации
-     */
-    private fun findValidStatements(body: Body): List<soot.Unit> {
-        return body.units.toList().filter { unit ->
-            !(unit is ReturnStmt || unit is ReturnVoidStmt ||
-                    unit is GotoStmt || unit is IfStmt || unit is IdentityStmt)
+    private fun findValidStatements(body: Body): List<Unit> =
+        body.units.filterNot {
+            it is ReturnStmt || it is ReturnVoidStmt || it is GotoStmt || it is IfStmt || it is IdentityStmt
         }
-    }
 
-    /**
-     * Оборачивает отдельный оператор в чистый for-цикл
-     */
-    private fun wrapStatementInCleanForLoop(body: Body, targetUnit: soot.Unit) {
+    private fun wrapStatementInForLoop(body: Body, target: Unit) {
+        val loopVar = generateLoopVar(body)
+        val bound = generateLoopBound()
+        val loop = createForLoop(loopVar, bound)
         val units = body.units
-        val localGen = DefaultLocalGenerator(body)
-        val loopVar = localGen.generateLocal(IntType.v())
-        val loopBound = generateRandomLoopBound()
 
-        // Создаем компоненты цикла
-        val forLoopComponents = createCleanForLoopComponents(loopVar, loopBound)
+        with(loop) {
+            units.insertBefore(init, target)
+            units.insertAfter(gotoCheck, init)
+            units.insertAfter(check, gotoCheck)
+            units.insertAfter(cond, check)
+            units.insertAfter(gotoEnd, cond)
+            units.insertAfter(bodyNop, gotoEnd)
 
-        // Вставляем структуру
-        with(forLoopComponents) {
-            units.insertBefore(initStmt, targetUnit)
-            units.insertAfter(gotoCondition, initStmt)
-            units.insertAfter(conditionCheck, gotoCondition)
-            units.insertAfter(conditionStmt, conditionCheck)
-            units.insertAfter(gotoEnd, conditionStmt)
-            units.insertAfter(loopBody, gotoEnd)
+            val cloned = target.clone() as Unit
+            units.insertAfter(cloned, bodyNop)
+            units.insertAfter(incr, cloned)
+            units.insertAfter(gotoCheckAfter, incr)
+            units.insertAfter(end, gotoCheckAfter)
 
-            try {
-                val clonedUnit = targetUnit.clone() as soot.Unit
-                units.insertAfter(clonedUnit, loopBody)
-                units.insertAfter(increment, clonedUnit)
-            } catch (e: Exception) {
-                units.insertAfter(increment, loopBody)
-            }
-
-            units.insertAfter(Jimple.v().newGotoStmt(conditionCheck), increment)
-            units.insertAfter(endLoop, units.getSuccOf(increment))
+            units.remove(target)
         }
-
-        // Удаляем оригинальный оператор
-        units.remove(targetUnit)
     }
 
-    /**
-     * Оборачивает отдельный оператор в бесконечный цикл с break
-     */
-    private fun wrapStatementInInfiniteLoop(body: Body, targetUnit: soot.Unit) {
+    private fun wrapStatementInInfiniteLoop(body: Body, target: Unit) {
+        val loopVar = generateLoopVar(body)
+        val bound = generateLoopBound()
+        val loop = createInfiniteLoop(loopVar, bound)
         val units = body.units
-        val localGen = DefaultLocalGenerator(body)
-        val loopVar = localGen.generateLocal(IntType.v())
-        val loopBound = generateRandomLoopBound()
 
-        // Создаем компоненты цикла
-        val infiniteLoopComponents = createInfiniteLoopComponents(loopVar, loopBound)
+        with(loop) {
+            units.insertBefore(init, target)
+            units.insertBefore(cond, target)
+            units.insertAfter(target.clone() as Unit, cond)
+            units.insertAfter(incr, target)
+            units.insertAfter(back, incr)
+            units.insertAfter(end, back)
 
-        // Вставляем структуру
-        with(infiniteLoopComponents) {
-            units.insertBefore(initStmt, targetUnit)
-            units.insertBefore(conditionStmt, targetUnit)
-            units.insertAfter(incrementStmt, targetUnit)
-            units.insertAfter(loopBackStmt, incrementStmt)
-            units.insertAfter(endLoop, loopBackStmt)
+            units.remove(target)
         }
     }
 
-    /**
-     * Оборачивает блок кода в чистый for-цикл
-     */
-    private fun wrapBlockInCleanForLoop(body: Body, block: Block) {
+    private fun wrapBlockInForLoop(body: Body, block: Block) {
+        val loopVar = generateLoopVar(body)
+        val bound = generateLoopBound()
+        val loop = createForLoop(loopVar, bound)
         val units = body.units
-        val localGen = DefaultLocalGenerator(body)
-        val loopVar = localGen.generateLocal(IntType.v())
-        val loopBound = generateRandomLoopBound()
 
-        val startUnit = block.startUnit
-        val endUnit = block.endUnit
+        with(loop) {
+            units.insertBefore(init, block.startUnit)
+            units.insertAfter(gotoCheck, init)
+            units.insertAfter(check, gotoCheck)
+            units.insertAfter(cond, check)
+            units.insertAfter(gotoEnd, cond)
+            units.insertAfter(bodyNop, gotoEnd)
 
-        // Создаем компоненты цикла
-        val blockForLoopComponents = createBlockForLoopComponents(loopVar, loopBound)
-
-        // Вставляем структуру вокруг блока
-        with(blockForLoopComponents) {
-            // Вставляем начальную часть цикла перед блоком
-            units.insertBefore(initStmt, startUnit)
-            units.insertAfter(gotoCondition, initStmt)
-            units.insertAfter(conditionCheck, gotoCondition)
-            units.insertAfter(conditionStmt, conditionCheck)
-            units.insertAfter(gotoAfterLoop, conditionStmt)
-            units.insertAfter(loopBodyStart, gotoAfterLoop)
-
-            // Вставляем конечную часть цикла после блока
-            units.insertAfter(loopBodyEnd, endUnit)
-            units.insertAfter(increment, loopBodyEnd)
-            units.insertAfter(gotoConditionAfterIncrement, increment)
-            units.insertAfter(afterLoop, gotoConditionAfterIncrement)
+            units.insertAfter(endBody, block.endUnit)
+            units.insertAfter(incr, endBody)
+            units.insertAfter(gotoCheckAfter, incr)
+            units.insertAfter(end, gotoCheckAfter)
         }
     }
 
-    /**
-     * Оборачивает блок кода в бесконечный цикл с break
-     */
     private fun wrapBlockInInfiniteLoop(body: Body, block: Block) {
+        val loopVar = generateLoopVar(body)
+        val bound = generateLoopBound()
+        val loop = createInfiniteLoop(loopVar, bound)
         val units = body.units
-        val localGen = DefaultLocalGenerator(body)
-        val loopVar = localGen.generateLocal(IntType.v())
-        val loopBound = generateRandomLoopBound()
 
-        val startUnit = block.startUnit
-        val endUnit = block.endUnit
+        val before = Jimple.v().newNopStmt()
+        val after = Jimple.v().newNopStmt()
 
-        // Создаем маркеры границ блока
-        val beforeBlockNop = Jimple.v().newNopStmt()
-        val afterBlockNop = Jimple.v().newNopStmt()
+        units.insertBefore(before, block.startUnit)
+        units.insertAfter(after, block.endUnit)
 
-        units.insertBefore(beforeBlockNop, startUnit)
-        units.insertAfter(afterBlockNop, endUnit)
+        with(loop) {
+            units.insertBefore(init, before)
+            units.insertAfter(start, init)
+            units.insertAfter(cond, start)
 
-        // Создаем компоненты цикла
-        val infiniteLoopComponents = createBlockInfiniteLoopComponents(loopVar, loopBound, afterBlockNop)
-
-        // Вставляем структуру
-        with(infiniteLoopComponents) {
-            units.insertBefore(initStmt, beforeBlockNop)
-            units.insertAfter(loopStart, initStmt)
-            units.insertAfter(conditionStmt, loopStart)
-
-            units.insertBefore(incrementStmt, afterBlockNop)
-            units.insertBefore(loopBackStmt, afterBlockNop)
+            units.insertBefore(incr, after)
+            units.insertBefore(back, after)
         }
     }
 
-    /**
-     * Генерирует случайное количество итераций для цикла
-     */
-    private fun generateRandomLoopBound(): IntConstant {
-        return IntConstant.v((1..5).random())
+    private fun generateLoopVar(body: Body): Local {
+        val local = DefaultLocalGenerator(body).generateLocal(IntType.v())
+        body.locals.add(local)
+        return local
     }
 
-    /**
-     * Создает компоненты чистого for-цикла для оператора
-     */
-    private data class ForLoopComponents(
-        val initStmt: soot.Unit,
-        val conditionCheck: soot.Unit,
-        val conditionStmt: soot.Unit,
-        val loopBody: soot.Unit,
-        val increment: soot.Unit,
-        val endLoop: soot.Unit,
-        val gotoCondition: soot.Unit,
-        val gotoEnd: soot.Unit
+    private fun generateLoopBound(): IntConstant = IntConstant.v((1..5).random())
+
+    // --- Loop Component Generators ---
+
+    private data class ForLoop(
+        val init: Unit,
+        val check: Unit,
+        val cond: Unit,
+        val bodyNop: Unit,
+        val incr: Unit,
+        val gotoCheck: Unit,
+        val gotoEnd: Unit,
+        val gotoCheckAfter: Unit,
+        val end: Unit,
+        val endBody: Unit = Jimple.v().newNopStmt() // optional for block loop
     )
 
-    private fun createCleanForLoopComponents(loopVar: soot.Local, loopBound: IntConstant): ForLoopComponents {
-        val initStmt = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
-        val conditionCheck = Jimple.v().newNopStmt()
-        val loopBody = Jimple.v().newNopStmt()
-        val increment = Jimple.v().newAssignStmt(
-            loopVar,
-            Jimple.v().newAddExpr(loopVar, IntConstant.v(1))
-        )
-        val endLoop = Jimple.v().newNopStmt()
+    private fun createForLoop(loopVar: Local, bound: IntConstant): ForLoop {
+        val init = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
+        val check = Jimple.v().newNopStmt()
+        val cond = Jimple.v().newIfStmt(Jimple.v().newLtExpr(loopVar, bound), Jimple.v().newNopStmt())
+        val gotoEnd = Jimple.v().newGotoStmt(Jimple.v().newNopStmt())
+        val bodyNop = cond.target
+        val end = gotoEnd.target
+        val incr = Jimple.v().newAssignStmt(loopVar, Jimple.v().newAddExpr(loopVar, IntConstant.v(1)))
+        val gotoCheck = Jimple.v().newGotoStmt(check)
+        val gotoCheckAfter = Jimple.v().newGotoStmt(check)
 
-        val conditionStmt = Jimple.v().newIfStmt(
-            Jimple.v().newLtExpr(loopVar, loopBound),
-            loopBody
-        )
-
-        val gotoCondition = Jimple.v().newGotoStmt(conditionCheck)
-        val gotoEnd = Jimple.v().newGotoStmt(endLoop)
-
-        return ForLoopComponents(
-            initStmt, conditionCheck, conditionStmt, loopBody,
-            increment, endLoop, gotoCondition, gotoEnd
-        )
+        return ForLoop(init, check, cond, bodyNop, incr, gotoCheck, gotoEnd, gotoCheckAfter, end)
     }
 
-    /**
-     * Создает компоненты бесконечного цикла для оператора
-     */
-    private data class InfiniteLoopComponents(
-        val initStmt: soot.Unit,
-        val conditionStmt: soot.Unit,
-        val incrementStmt: soot.Unit,
-        val loopBackStmt: soot.Unit,
-        val endLoop: soot.Unit
+    private data class InfiniteLoop(
+        val init: Unit,
+        val start: Unit,
+        val cond: Unit,
+        val incr: Unit,
+        val back: Unit,
+        val end: Unit
     )
 
-    private fun createInfiniteLoopComponents(loopVar: soot.Local, loopBound: IntConstant): InfiniteLoopComponents {
-        val initStmt = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
-        val endLoop = Jimple.v().newNopStmt()
-        val conditionStmt = Jimple.v().newIfStmt(
-            Jimple.v().newGeExpr(loopVar, loopBound),
-            endLoop
-        )
-        val incrementStmt = Jimple.v().newAssignStmt(
-            loopVar,
-            Jimple.v().newAddExpr(loopVar, IntConstant.v(1))
-        )
-        val loopBackStmt = Jimple.v().newGotoStmt(conditionStmt)
+    private fun createInfiniteLoop(loopVar: Local, bound: IntConstant): InfiniteLoop {
+        val init = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
+        val start = Jimple.v().newNopStmt()
+        val end = Jimple.v().newNopStmt()
+        val cond = Jimple.v().newIfStmt(Jimple.v().newGeExpr(loopVar, bound), end)
+        val incr = Jimple.v().newAssignStmt(loopVar, Jimple.v().newAddExpr(loopVar, IntConstant.v(1)))
+        val back = Jimple.v().newGotoStmt(start)
 
-        return InfiniteLoopComponents(
-            initStmt, conditionStmt, incrementStmt, loopBackStmt, endLoop
-        )
+        return InfiniteLoop(init, start, cond, incr, back, end)
     }
-
-    /**
-     * Создает компоненты чистого for-цикла для блока
-     */
-    private data class BlockForLoopComponents(
-        val initStmt: soot.Unit,
-        val conditionCheck: soot.Unit,
-        val conditionStmt: soot.Unit,
-        val loopBodyStart: soot.Unit,
-        val loopBodyEnd: soot.Unit,
-        val increment: soot.Unit,
-        val afterLoop: soot.Unit,
-        val gotoCondition: soot.Unit,
-        val gotoAfterLoop: soot.Unit,
-        val gotoConditionAfterIncrement: soot.Unit
-    )
-
-    private fun createBlockForLoopComponents(loopVar: soot.Local, loopBound: IntConstant): BlockForLoopComponents {
-        val initStmt = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
-        val conditionCheck = Jimple.v().newNopStmt()
-        val loopBodyStart = Jimple.v().newNopStmt()
-        val loopBodyEnd = Jimple.v().newNopStmt()
-        val increment = Jimple.v().newAssignStmt(
-            loopVar,
-            Jimple.v().newAddExpr(loopVar, IntConstant.v(1))
-        )
-        val afterLoop = Jimple.v().newNopStmt()
-
-        val conditionStmt = Jimple.v().newIfStmt(
-            Jimple.v().newLtExpr(loopVar, loopBound),
-            loopBodyStart
-        )
-
-        val gotoCondition = Jimple.v().newGotoStmt(conditionCheck)
-        val gotoAfterLoop = Jimple.v().newGotoStmt(afterLoop)
-        val gotoConditionAfterIncrement = Jimple.v().newGotoStmt(conditionCheck)
-
-        return BlockForLoopComponents(
-            initStmt, conditionCheck, conditionStmt, loopBodyStart, loopBodyEnd,
-            increment, afterLoop, gotoCondition, gotoAfterLoop, gotoConditionAfterIncrement
-        )
-    }
-
-    /**
-     * Создает компоненты бесконечного цикла для блока
-     */
-    private data class BlockInfiniteLoopComponents(
-        val initStmt: soot.Unit,
-        val loopStart: soot.Unit,
-        val conditionStmt: soot.Unit,
-        val incrementStmt: soot.Unit,
-        val loopBackStmt: soot.Unit
-    )
-
-    private fun createBlockInfiniteLoopComponents(
-        loopVar: soot.Local,
-        loopBound: IntConstant,
-        afterBlockNop: soot.Unit
-    ): BlockInfiniteLoopComponents {
-        val initStmt = Jimple.v().newAssignStmt(loopVar, IntConstant.v(0))
-        val loopStart = Jimple.v().newNopStmt()
-        val conditionStmt = Jimple.v().newIfStmt(
-            Jimple.v().newGeExpr(loopVar, loopBound),
-            afterBlockNop
-        )
-        val incrementStmt = Jimple.v().newAssignStmt(
-            loopVar,
-            Jimple.v().newAddExpr(loopVar, IntConstant.v(1))
-        )
-        val loopBackStmt = Jimple.v().newGotoStmt(loopStart)
-
-        return BlockInfiniteLoopComponents(
-            initStmt, loopStart, conditionStmt, incrementStmt, loopBackStmt
-        )
-    }
-
 }
