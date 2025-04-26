@@ -1,40 +1,25 @@
 package core.mutation;
 
 import core.mutation.strategy.common.MutationStrategy
+import core.mutation.strategy.common.StrategyStats
 import infrastructure.translator.JimpleTranslator
-import kotlin.math.exp
 import kotlin.random.Random
 
 class AdaptiveMutator(
     private val jimpleTranslator: JimpleTranslator,
     private val strategies: List<MutationStrategy>,
-    private val explorationFactor: Double = 0.1
+    private val explorationFactor: Double = 0.2,
+    private val forgetFactor: Double = 0.9,
+    private val forgetFrequency: Int = 250
 ) : Mutator {
+    private var iterationsSinceLastForget = 0
     private val strategyStats = mutableMapOf<String, StrategyStats>()
     private val random = Random
 
     private var lastMutationRecord: MutationRecord? = null
 
-    data class StrategyStats(
-        var totalApplications: Int = 0,
-        var successfulMutations: Int = 0,
-        var seedsGenerated: Int = 0,
-        var anomaliesFound: Int = 0,
-        var failures: Int = 0
-    ) {
-        fun calculateEffectiveness(): Double {
-            if (totalApplications == 0) return 0.1
-
-            val baseScore =
-                (0.2 * successfulMutations + 0.5 * seedsGenerated + 1.0 * anomaliesFound - 0.3 * failures) / totalApplications
-
-            // Преобразование через сигмоидную функцию в диапазон (0,1)
-            // или можно использовать: return 1.0 / (1.0 + Math.exp(-baseScore))
-            return 0.1 + 0.9 / (1.0 + exp(-2 * baseScore))
-        }
-    }
-
     override fun mutate(bytecode: ByteArray, className: String, packageName: String): ByteArray {
+        onNewIteration()
         val jimpleCode = jimpleTranslator.toJimple(bytecode, className)
         var mutatedJimple = jimpleCode.data
 
@@ -111,6 +96,26 @@ class AdaptiveMutator(
 
     fun getLastMutationRecord(): MutationRecord? {
         return lastMutationRecord
+    }
+
+    private fun onNewIteration() {
+        iterationsSinceLastForget++
+
+        // Периодически "забывать" часть статистики
+        if (iterationsSinceLastForget >= forgetFrequency) {
+            forgetSomeStatistics()
+            iterationsSinceLastForget = 0
+        }
+    }
+
+    private fun forgetSomeStatistics() {
+        strategyStats.values.forEach { stats ->
+            stats.totalApplications = (stats.totalApplications * forgetFactor).toInt()
+            stats.successfulMutations = (stats.successfulMutations * forgetFactor).toInt()
+            stats.seedsGenerated = (stats.seedsGenerated * forgetFactor).toInt()
+            stats.anomaliesFound = (stats.anomaliesFound * forgetFactor).toInt()
+            stats.failures = (stats.failures * forgetFactor).toInt()
+        }
     }
 
     // Методы для обратной связи от фаззера
