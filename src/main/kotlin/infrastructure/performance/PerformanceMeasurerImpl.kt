@@ -238,10 +238,10 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
                 return createFailedParsingMetrics(jmhResult)
             }
 
-            val metrics = parseResultFile(jsonResultFile, jmhResult)
-            renameResultFile(jsonResultFile, jvmName)
+            val reportPath = renameResultFile(jsonResultFile, jvmName)
+            val metrics = parseResultFile(File(reportPath), jmhResult)
 
-            metrics
+            return metrics.copy(jmhReportPath = reportPath)
         } catch (e: Exception) {
             println("Ошибка парсинга результатов JMH: ${e.message}")
             createFailedParsingMetrics(jmhResult)
@@ -276,9 +276,11 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         )
     }
 
-    private fun renameResultFile(jsonResultFile: File, jvmName: String) {
+    private fun renameResultFile(jsonResultFile: File, jvmName: String): String {
         val jsonFilePathWithoutExtension = jsonResultFile.path.replace(".json", "")
-        jsonResultFile.renameTo(File("$jsonFilePathWithoutExtension-$jvmName.json"))
+        val newFile = File("$jsonFilePathWithoutExtension-$jvmName.json")
+        jsonResultFile.renameTo(newFile)
+        return newFile.absolutePath
     }
 
     private fun createTimedOutMetrics(jmhResult: JvmExecutionResult): PerformanceMetrics {

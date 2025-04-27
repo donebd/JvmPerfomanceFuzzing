@@ -9,5 +9,6 @@ data class PerformanceMetrics(
     val avgTimeMs: Double,
     val maxTimeMs: Double,
     val successfullyParsed: Boolean,
-    val jvmExecutionResult: JvmExecutionResult
+    val jvmExecutionResult: JvmExecutionResult,
+    val jmhReportPath: String? = null
 )

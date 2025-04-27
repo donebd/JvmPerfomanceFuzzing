@@ -37,9 +37,11 @@ class FileAnomalyRepository(
         // Создаем подпапки для аномалий и байткода
         val anomaliesDir = File(seedDir, "anomalies")
         val bytecodeDir = File(seedDir, "bytecode")
+        val jmhReportsDir = File(seedDir, "jmh_reports")
 
         anomaliesDir.mkdirs()
         bytecodeDir.mkdirs()
+        jmhReportsDir.mkdirs()
 
         // Сохраняем информацию о сиде
         val seedInfoFile = File(seedDir, "seed_info.json")
@@ -69,6 +71,33 @@ class FileAnomalyRepository(
                 val anomalyWithoutJitData = anomalyGroup.copy(jitData = null)
                 anomalyFile.writeText(objectMapper.writeValueAsString(anomalyWithoutJitData))
             }
+        }
+
+        var reportsCopied = 0
+
+        seed.anomalies.forEach { anomalyGroup ->
+            val allJvms = anomalyGroup.fasterJvms + anomalyGroup.slowerJvms
+
+            allJvms.forEach { jvmResult ->
+                val metrics = jvmResult.metrics
+                val reportPath = metrics.jmhReportPath
+
+                if (reportPath != null) {
+                    val sourceFile = File(reportPath)
+                    if (sourceFile.exists()) {
+                        val jvmName = jvmResult.jvmName
+                        val targetFileName = "jmh_${anomalyGroup.anomalyType.name.lowercase()}_${jvmName}.json"
+                        val targetFile = File(jmhReportsDir, targetFileName)
+
+                        sourceFile.copyTo(targetFile, overwrite = true)
+                        reportsCopied++
+                    }
+                }
+            }
+        }
+
+        if (reportsCopied > 0) {
+            println("Сохранено $reportsCopied JMH отчетов для сида ${seed.description}")
         }
 
         seed.anomalies
