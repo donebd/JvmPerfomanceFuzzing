@@ -31,7 +31,7 @@ data class Seed(
         bytecodeEntry,
         mutationHistory,
         calculateEnergy(interestingness),
-        generateSeedDescription(anomalies, iteration),
+        generateSeedDescription("", anomalies, iteration),
         interestingness,
         anomalies,
         iteration,
@@ -46,7 +46,7 @@ data class Seed(
         interestingness = newInterestingness
         energy = calculateEnergy(newInterestingness)
         verified = confirmedAnomalies.isNotEmpty()
-        description = generateSeedDescription(anomalies, iteration)
+        description = generateSeedDescription(description, anomalies, iteration)
     }
 
     override fun equals(other: Any?): Boolean {
@@ -68,9 +68,14 @@ data class Seed(
         }
 
         fun generateSeedDescription(
+            oldDescription: String,
             anomalies: List<PerformanceAnomalyGroup>,
             iteration: Int
         ): String {
+            if (anomalies.isEmpty()) {
+                return oldDescription + "_Unverified"
+            }
+
             val types = anomalies.map { it.anomalyType }.distinct().joinToString("_")
 
             val maxDeviation = anomalies
