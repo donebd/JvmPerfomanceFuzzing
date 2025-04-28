@@ -6,6 +6,11 @@ package infrastructure.performance.entity
  */
 enum class SignificanceLevel {
     /**
+     * Аномалии не обнаружены ни на одном уровне значимости
+     */
+    NOT_SIGNIFICANT,
+
+    /**
      * Менее строгий уровень для поиска потенциально интересных сидов во время эволюции
      */
     SEED_EVOLUTION,

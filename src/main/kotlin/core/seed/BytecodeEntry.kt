@@ -1,5 +1,8 @@
 package core.seed
 
+/**
+ * Представляет байткод Java-класса вместе с метаданными.
+ */
 data class BytecodeEntry(
     val bytecode: ByteArray,
     val className: String,

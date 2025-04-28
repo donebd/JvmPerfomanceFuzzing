@@ -6,10 +6,8 @@ import infrastructure.jit.model.JITProfile
 import infrastructure.jvm.JvmExecutor
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.anomaly.JITAnomalyData
-import infrastructure.performance.entity.JvmPerformanceResult
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
-import infrastructure.performance.entity.PerformanceMetrics
-import infrastructure.performance.entity.SignificanceLevel
+import infrastructure.performance.entity.*
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -42,13 +40,51 @@ class PerformanceAnalyzerImpl(
     }
 
     /**
+     * Анализирует метрики производительности с автоматическим определением уровня значимости.
+     * Последовательно применяет строгие (REPORTING) и менее строгие (SEED_EVOLUTION) критерии.
+     *
+     * @param metrics список пар JvmExecutor и метрик производительности
+     * @return результат анализа, содержащий обнаруженные аномалии, уровень значимости и оценку интересности
+     */
+    override fun analyze(metrics: List<Pair<JvmExecutor, PerformanceMetrics>>): AnalysisResult {
+        val reportingAnomalies = analyzeWithSignificanceLevel(metrics, SignificanceLevel.REPORTING)
+        if (reportingAnomalies.isNotEmpty() && areAnomaliesInteresting(reportingAnomalies)) {
+            val interestingness = calculateInterestingness(reportingAnomalies)
+            return AnalysisResult(
+                anomalies = reportingAnomalies,
+                significanceLevel = SignificanceLevel.REPORTING,
+                isInteresting = true,
+                interestingnessScore = interestingness
+            )
+        }
+
+        val seedEvolAnomalies = analyzeWithSignificanceLevel(metrics, SignificanceLevel.SEED_EVOLUTION)
+        if (seedEvolAnomalies.isNotEmpty() && areAnomaliesInteresting(seedEvolAnomalies)) {
+            val interestingness = calculateInterestingness(seedEvolAnomalies)
+            return AnalysisResult(
+                anomalies = seedEvolAnomalies,
+                significanceLevel = SignificanceLevel.SEED_EVOLUTION,
+                isInteresting = true,
+                interestingnessScore = interestingness
+            )
+        }
+
+        return AnalysisResult(
+            anomalies = emptyList(),
+            significanceLevel = SignificanceLevel.NOT_SIGNIFICANT,
+            isInteresting = false,
+            interestingnessScore = 0.0
+        )
+    }
+
+    /**
      * Анализирует метрики производительности и выявляет аномалии между различными JVM.
      *
      * @param metrics список пар JvmExecutor и метрик производительности
      * @param significanceLevel уровень значимости для определения порогов аномалий
      * @return список обнаруженных групп аномалий
      */
-    override fun analyze(
+    private fun analyzeWithSignificanceLevel(
         metrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
         significanceLevel: SignificanceLevel
     ): List<PerformanceAnomalyGroup> {
@@ -85,33 +121,54 @@ class PerformanceAnalyzerImpl(
     }
 
     /**
-     * Проверяет, представляют ли найденные аномалии интерес.
+     * Выполняет комбинированный анализ производительности и JIT-компиляции с автоматическим
+     * определением уровня значимости. Последовательно применяет критерии от строгих к менее строгим.
      *
-     * @param anomalies список групп аномалий для проверки
-     * @return true, если аномалии интересны
+     * @param metrics список пар JvmExecutor и метрик производительности
+     * @return расширенный результат анализа, включающий данные JIT и общую интересность
      */
-    override fun areAnomaliesInteresting(anomalies: List<PerformanceAnomalyGroup>): Boolean {
-        if (anomalies.isEmpty()) return false
+    override fun analyzeWithJIT(metrics: List<Pair<JvmExecutor, PerformanceMetrics>>): ExtendedAnalysisResult {
+        val levels = listOf(SignificanceLevel.REPORTING, SignificanceLevel.SEED_EVOLUTION)
 
-        val timeoutAnomalies = anomalies.filter { it.anomalyType == AnomalyGroupType.TIMEOUT }
-        if (timeoutAnomalies.isNotEmpty() && timeoutAnomalies.all { it.interestingnessScore <= 0 }) {
-            return false
+        for (level in levels) {
+            val result = analyzeWithJITAndLevel(metrics, level)
+            val anomalies = result.first
+            val jitResult = result.second
+            val jitInterestingness = jitResult.first
+
+            val isResult = evaluateResults(anomalies, jitInterestingness)
+
+            if (isResult.isInteresting) {
+                return ExtendedAnalysisResult(
+                    anomalies = anomalies,
+                    significanceLevel = level,
+                    isAnomaliesInteresting = true,
+                    interestingnessScore = isResult.interestingnessScore,
+                    jitData = jitResult.second
+                )
+            }
         }
 
-        val errorAnomalies = anomalies.filter { it.anomalyType == AnomalyGroupType.ERROR }
-        return !(errorAnomalies.isNotEmpty() && errorAnomalies.all { it.interestingnessScore <= 0 })
-    }
+        val relaxedResult = analyzeWithJITAndLevel(metrics, SignificanceLevel.SEED_EVOLUTION)
+        val jitResult = relaxedResult.second
 
-    /**
-     * Рассчитывает общую интересность набора аномалий.
-     *
-     * @param anomalies список групп аномалий
-     * @return суммарная интересность в диапазоне [0, +∞)
-     */
-    override fun calculateOverallInterestingness(anomalies: List<PerformanceAnomalyGroup>): Double {
-        if (!areAnomaliesInteresting(anomalies)) return 0.0
+        if (jitResult.second != null && jitResult.first > 0) {
+            return ExtendedAnalysisResult(
+                anomalies = emptyList(),
+                significanceLevel = SignificanceLevel.SEED_EVOLUTION,
+                isAnomaliesInteresting = true,
+                interestingnessScore = jitResult.first,
+                jitData = jitResult.second
+            )
+        }
 
-        return anomalies.sumOf { it.interestingnessScore } / anomalies.size.coerceAtLeast(1)
+        return ExtendedAnalysisResult(
+            anomalies = emptyList(),
+            significanceLevel = SignificanceLevel.NOT_SIGNIFICANT,
+            isAnomaliesInteresting = false,
+            interestingnessScore = 0.0,
+            jitData = null
+        )
     }
 
     /**
@@ -119,13 +176,12 @@ class PerformanceAnalyzerImpl(
      *
      * @param metrics список пар JvmExecutor и метрик
      * @param significanceLevel уровень значимости для определения порогов
-     * @return пара (список аномалий, (JIT-интересность, JIT-данные))
      */
-    override fun analyzeWithJIT(
+    private fun analyzeWithJITAndLevel(
         metrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
         significanceLevel: SignificanceLevel
     ): Pair<List<PerformanceAnomalyGroup>, Pair<Double, JITAnomalyData?>> {
-        val performanceAnomalies = analyze(metrics, significanceLevel)
+        val performanceAnomalies = analyzeWithSignificanceLevel(metrics, significanceLevel)
 
         val jitResult = analyzeJIT(
             metrics.map { it.first },
@@ -172,6 +228,7 @@ class PerformanceAnalyzerImpl(
         val significanceMultiplier = when (significanceLevel) {
             SignificanceLevel.SEED_EVOLUTION -> 1.0  // Мягкий критерий для сидов
             SignificanceLevel.REPORTING -> 0.6       // Строгий критерий для отчетов
+            else -> throw IllegalArgumentException()
         }
 
         return Pair(interestScore * significanceMultiplier, jitAnomalyData)
@@ -185,7 +242,7 @@ class PerformanceAnalyzerImpl(
      * @param jitData данные JIT-анализа
      * @return обогащенный список аномалий
      */
-    override fun enrichAnomaliesWithJIT(
+    private fun enrichAnomaliesWithJIT(
         anomalies: List<PerformanceAnomalyGroup>,
         jitData: JITAnomalyData
     ): List<PerformanceAnomalyGroup> {
@@ -209,29 +266,50 @@ class PerformanceAnalyzerImpl(
         return enrichedAnomalies
     }
 
-    /**
-     * Извлекает JIT-данные из логов и обогащает ими аномалии.
-     *
-     * @param anomalies список аномалий для обогащения
-     * @param jvmExecutors список исполнителей JVM
-     * @param metrics карта метрик производительности
-     * @param jitAnalyzer анализатор JIT-логов
-     * @return обогащенный список аномалий
-     */
-    override fun enrichAnomaliesWithJITFromLogs(
-        anomalies: List<PerformanceAnomalyGroup>,
-        jvmExecutors: List<JvmExecutor>,
-        metrics: Map<JvmExecutor, PerformanceMetrics>,
-        jitAnalyzer: JITAnalyzer
-    ): List<PerformanceAnomalyGroup> {
-        val profiles = collectJitProfilesWithAnalyzer(jvmExecutors, metrics, jitAnalyzer)
-        if (profiles.size < 2) return anomalies
+    private fun calculateInterestingness(anomalies: List<PerformanceAnomalyGroup>): Double {
+        if (!areAnomaliesInteresting(anomalies)) return 0.0
 
-        val comparisons = createJvmComparisonsWithAnalyzer(jvmExecutors, metrics, profiles, jitAnalyzer)
-        val jitData = JITAnomalyData(profiles, comparisons)
-
-        return enrichAnomaliesWithJIT(anomalies, jitData)
+        return anomalies.sumOf { it.interestingnessScore } / anomalies.size.coerceAtLeast(1)
     }
+
+    private fun areAnomaliesInteresting(anomalies: List<PerformanceAnomalyGroup>): Boolean {
+        if (anomalies.isEmpty()) return false
+
+        val timeoutAnomalies = anomalies.filter { it.anomalyType == AnomalyGroupType.TIMEOUT }
+        if (timeoutAnomalies.isNotEmpty() && timeoutAnomalies.all { it.interestingnessScore <= 0 }) {
+            return false
+        }
+
+        val errorAnomalies = anomalies.filter { it.anomalyType == AnomalyGroupType.ERROR }
+        return !(errorAnomalies.isNotEmpty() && errorAnomalies.all { it.interestingnessScore <= 0 })
+    }
+
+    private fun evaluateResults(
+        anomalies: List<PerformanceAnomalyGroup>,
+        jitInterestingness: Double
+    ): ResultEvaluation {
+        val hasPerformanceAnomalies = anomalies.isNotEmpty() && areAnomaliesInteresting(anomalies)
+        val hasJitAnomalies = jitInterestingness >= 15.0
+        val isInteresting = hasPerformanceAnomalies || hasJitAnomalies
+
+        val interestingnessScore = if (hasPerformanceAnomalies) {
+            calculateInterestingness(anomalies) + (jitInterestingness * 0.3)
+        } else if (hasJitAnomalies) {
+            jitInterestingness
+        } else {
+            0.0
+        }
+
+        return ResultEvaluation(isInteresting, interestingnessScore)
+    }
+
+    /**
+     * Вспомогательный класс для представления результатов оценки
+     */
+    private data class ResultEvaluation(
+        val isInteresting: Boolean,
+        val interestingnessScore: Double
+    )
 
     // --- Вспомогательные методы для анализа производительности ---
 
@@ -251,13 +329,15 @@ class PerformanceAnalyzerImpl(
         return when (significanceLevel) {
             SignificanceLevel.REPORTING -> Thresholds(
                 timeThreshold = significantTimeThreshold,
-                memoryThreshold = significantMemoryThreshold
+                memoryThreshold = significantMemoryThreshold,
             )
 
             SignificanceLevel.SEED_EVOLUTION -> Thresholds(
                 timeThreshold = potentialTimeThreshold,
                 memoryThreshold = potentialMemoryThreshold
             )
+
+            else -> throw IllegalArgumentException()
         }
     }
 
@@ -524,6 +604,7 @@ class PerformanceAnalyzerImpl(
         val errorMultiplier = when (level) {
             SignificanceLevel.SEED_EVOLUTION -> 0.5
             SignificanceLevel.REPORTING -> 1.0
+            else -> throw IllegalArgumentException()
         }
 
         val adjustedError1 = error1 * errorMultiplier
@@ -547,6 +628,7 @@ class PerformanceAnalyzerImpl(
         val errorMultiplier = when (level) {
             SignificanceLevel.SEED_EVOLUTION -> 0.5
             SignificanceLevel.REPORTING -> 1.0
+            else -> throw IllegalArgumentException()
         }
 
         val adjustedError1 = error1 * errorMultiplier
@@ -730,27 +812,6 @@ class PerformanceAnalyzerImpl(
         return profiles
     }
 
-    private fun collectJitProfilesWithAnalyzer(
-        jvmExecutors: List<JvmExecutor>,
-        metrics: Map<JvmExecutor, PerformanceMetrics>,
-        jitAnalyzer: JITAnalyzer
-    ): Map<String, JITProfile> {
-        val profiles = mutableMapOf<String, JITProfile>()
-
-        for (executor in jvmExecutors) {
-            val jvmName = executor::class.simpleName ?: continue
-            val metric = metrics[executor] ?: continue
-
-            try {
-                profiles[jvmName] = jitAnalyzer.analyzeJITLogs(executor, metric)
-            } catch (e: Exception) {
-                println("Ошибка при анализе JIT-логов для $jvmName: ${e.message}")
-            }
-        }
-
-        return profiles
-    }
-
     private fun createJvmComparisons(
         jvmExecutors: List<JvmExecutor>,
         metrics: Map<JvmExecutor, PerformanceMetrics>,
@@ -784,44 +845,6 @@ class PerformanceAnalyzerImpl(
                         )
                     )
                 }
-            }
-        }
-
-        return comparisons
-    }
-
-    private fun createJvmComparisonsWithAnalyzer(
-        jvmExecutors: List<JvmExecutor>,
-        metrics: Map<JvmExecutor, PerformanceMetrics>,
-        profiles: Map<String, JITProfile>,
-        jitAnalyzer: JITAnalyzer
-    ): List<JITComparisonResult> {
-        val comparisons = mutableListOf<JITComparisonResult>()
-        val jvmNames = profiles.keys.toList()
-
-        for (i in 0 until jvmNames.size - 1) {
-            for (j in i + 1 until jvmNames.size) {
-                val jvm1 = jvmNames[i]
-                val jvm2 = jvmNames[j]
-
-                val exec1 = jvmExecutors.find { it::class.simpleName == jvm1 } ?: continue
-                val exec2 = jvmExecutors.find { it::class.simpleName == jvm2 } ?: continue
-
-                val time1 = metrics[exec1]?.avgTimeMs ?: continue
-                val time2 = metrics[exec2]?.avgTimeMs ?: continue
-
-                val (faster, slower) = if (time1 < time2) {
-                    Pair(jvm1, jvm2)
-                } else {
-                    Pair(jvm2, jvm1)
-                }
-
-                comparisons.add(
-                    jitAnalyzer.compareJITProfiles(
-                        profiles[faster]!!,
-                        profiles[slower]!!
-                    )
-                )
             }
         }
 

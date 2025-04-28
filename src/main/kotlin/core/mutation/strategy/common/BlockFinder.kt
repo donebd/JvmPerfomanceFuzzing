@@ -48,8 +48,3 @@ class BlockFinder(private val body: Body) {
         }
     }
 }
-
-/**
- * Структура данных для представления блока кода
- */
-data class Block(val startUnit: soot.Unit, val endUnit: soot.Unit)

@@ -3,9 +3,21 @@ package infrastructure.jvm
 import infrastructure.jvm.entity.JvmExecutionException
 import infrastructure.jvm.entity.JvmExecutionResult
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
+/**
+ * Базовая абстрактная реализация JvmExecutor, предоставляющая основную логику
+ * запуска и контроля JVM-процесса с обработкой вывода и таймаутов.
+ * Конкретные подклассы должны реализовать построение команды запуска.
+ */
 abstract class AbstractJvmExecutor(protected val jvmPath: String) : JvmExecutor {
+
+    companion object {
+        private const val FORCE_TERMINATION_TIMEOUT_SECONDS = 5L
+        private const val OUTPUT_READER_JOIN_TIMEOUT_MS = 2000L
+        private const val TIMEOUT_EXIT_CODE = -100
+    }
 
     override fun execute(
         classPathDirectory: File,
@@ -15,90 +27,100 @@ abstract class AbstractJvmExecutor(protected val jvmPath: String) : JvmExecutor 
         executionTimeOut: Long,
         jvmOptions: List<String>
     ): JvmExecutionResult {
-        // Формируем команду с параметрами
         val command = buildCommand(classPathString, mainClass, mainArgs, jvmOptions)
 
-        return try {
-            val process = ProcessBuilder(command)
-                .directory(classPathDirectory)
-                .redirectErrorStream(false)
-                .start()
+        try {
+            val process = startProcess(command, classPathDirectory)
+            val outputReaders = captureProcessOutput(process)
 
-            // Асинхронное чтение вывода для избежания блокировки буферов
-            val stdoutThread = startOutputReaderThread(process.inputStream)
-            val stderrThread = startOutputReaderThread(process.errorStream)
-
-            // Ждем с таймаутом
             val completed = process.waitFor(executionTimeOut, TimeUnit.SECONDS)
 
-            // Если процесс не завершился в течение таймаута
-            if (!completed) {
-                // Жесткое завершение процесса (destroyForcibly более надежно, чем destroy)
-                process.destroyForcibly()
-
-                // Даем небольшое время на завершение после принудительного убийства
-                process.waitFor(5, TimeUnit.SECONDS)
-
-                stdoutThread.join(2000)
-                stderrThread.join(2000)
-
-                return JvmExecutionResult(
-                    exitCode = -100, // Специальный код для таймаута
-                    stdout = stdoutThread.output.toString(),
-                    stderr = stderrThread.output.toString(),
-                    timedOut = true
-                )
+            return if (!completed) {
+                handleProcessTimeout(process, outputReaders)
+            } else {
+                collectProcessResult(process, outputReaders)
             }
-
-            // Дожидаемся завершения потоков чтения вывода
-            stdoutThread.join()
-            stderrThread.join()
-
-            val exitCode = process.exitValue()
-
-            JvmExecutionResult(
-                exitCode = exitCode,
-                stdout = stdoutThread.output.toString(),
-                stderr = stderrThread.output.toString(),
-                timedOut = false
-            )
         } catch (e: Exception) {
             throw JvmExecutionException("Ошибка выполнения JVM: ${e.message}", e)
         }
     }
 
-    // Вспомогательный класс для чтения вывода в отдельном потоке
-    private class OutputReader(private val inputStream: java.io.InputStream) : Thread() {
+    private fun startProcess(command: List<String>, workDir: File): Process =
+        ProcessBuilder(command)
+            .directory(workDir)
+            .redirectErrorStream(false)
+            .start()
+
+    private fun captureProcessOutput(process: Process): Pair<StreamReader, StreamReader> {
+        val stdoutReader = StreamReader(process.inputStream)
+        val stderrReader = StreamReader(process.errorStream)
+
+        stdoutReader.start()
+        stderrReader.start()
+
+        return Pair(stdoutReader, stderrReader)
+    }
+
+    private fun handleProcessTimeout(
+        process: Process,
+        readers: Pair<StreamReader, StreamReader>
+    ): JvmExecutionResult {
+        process.destroyForcibly()
+        process.waitFor(FORCE_TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+
+        val (stdoutReader, stderrReader) = readers
+        stdoutReader.join(OUTPUT_READER_JOIN_TIMEOUT_MS)
+        stderrReader.join(OUTPUT_READER_JOIN_TIMEOUT_MS)
+
+        return JvmExecutionResult(
+            exitCode = TIMEOUT_EXIT_CODE,
+            stdout = stdoutReader.output.toString(),
+            stderr = stderrReader.output.toString(),
+            timedOut = true
+        )
+    }
+
+    private fun collectProcessResult(
+        process: Process,
+        readers: Pair<StreamReader, StreamReader>
+    ): JvmExecutionResult {
+        val (stdoutReader, stderrReader) = readers
+        stdoutReader.join()
+        stderrReader.join()
+
+        return JvmExecutionResult(
+            exitCode = process.exitValue(),
+            stdout = stdoutReader.output.toString(),
+            stderr = stderrReader.output.toString(),
+            timedOut = false
+        )
+    }
+
+    private class StreamReader(private val inputStream: InputStream) : Thread() {
         val output = StringBuilder()
 
         override fun run() {
             try {
                 inputStream.bufferedReader().use { reader ->
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
+                    reader.forEachLine { line ->
                         output.append(line).append("\n")
                     }
                 }
             } catch (e: Exception) {
-                // Игнорируем ошибки при завершении процесса
+                // Исключения при закрытии потока - ожидаемое поведение
+                // при принудительном завершении процесса
             }
         }
-    }
-
-    private fun startOutputReaderThread(inputStream: java.io.InputStream): OutputReader {
-        val reader = OutputReader(inputStream)
-        reader.start()
-        return reader
     }
 
     /**
      * Формирует команду для запуска JVM.
      *
-     * @param classPathString строка с полными путями для флага `-cp`.
-     * @param mainClass имя класса с точкой входа.
-     * @param mainArgs аргументы для запуска `main` класса.
-     * @param jvmOptions дополнительные параметры JVM.
-     * @return список аргументов для запуска процесса JVM.
+     * @param classPathString строка с путями для флага `-cp`
+     * @param mainClass имя класса с точкой входа
+     * @param mainArgs аргументы для `main` метода
+     * @param jvmOptions дополнительные параметры JVM
+     * @return список аргументов для запуска процесса
      */
     protected abstract fun buildCommand(
         classPathString: String,

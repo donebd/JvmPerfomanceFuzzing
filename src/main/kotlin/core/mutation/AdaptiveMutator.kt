@@ -1,10 +1,14 @@
-package core.mutation;
+package core.mutation
 
 import core.mutation.strategy.common.MutationStrategy
 import core.mutation.strategy.common.StrategyStats
 import infrastructure.translator.JimpleTranslator
 import kotlin.random.Random
 
+/**
+ * Адаптивный мутатор, который выбирает стратегии мутации на основе их эффективности.
+ * Использует механизм "рулетки" с весами, основанными на предыдущих результатах.
+ */
 class AdaptiveMutator(
     private val jimpleTranslator: JimpleTranslator,
     private val strategies: List<MutationStrategy>,
@@ -19,55 +23,61 @@ class AdaptiveMutator(
     private var lastMutationRecord: MutationRecord? = null
 
     override fun mutate(bytecode: ByteArray, className: String, packageName: String): ByteArray {
-        onNewIteration()
-        val jimpleCode = jimpleTranslator.toJimple(bytecode, className)
-        var mutatedJimple = jimpleCode.data
+        refreshStatistics()
 
-        // Выбор стратегии с использованием рулетки
-        val selectedStrategy = selectStrategyByRoulette()
+        val jimpleCode = jimpleTranslator.toJimple(bytecode, className)
+        val selectedStrategy = selectStrategy()
         val strategyName = selectedStrategy::class.simpleName ?: "Unknown"
 
-        val newJimple = selectedStrategy.apply(mutatedJimple, className, packageName)
+        val result = selectedStrategy.apply(jimpleCode.data, className, packageName)
         lastMutationRecord = MutationRecord(
-            parentSeedDescription = "",  // Будет заполнено в EvolutionaryFuzzer
+            parentSeedDescription = "",  // Заполняется в EvolutionaryFuzzer
             strategyName = strategyName
         )
-        updateStats(strategyName, wasSuccessful = !newJimple.hadError)
 
-        if (!newJimple.hadError) {
-            mutatedJimple = newJimple.jimpleCode
-        }
+        updateStats(strategyName, wasSuccessful = !result.hadError)
 
-        return jimpleTranslator.toBytecode(mutatedJimple, className, packageName)
+        val finalJimple = if (!result.hadError) result.jimpleCode else jimpleCode.data
+        return jimpleTranslator.toBytecode(finalJimple, className, packageName)
     }
 
-    /**
-     * Выбирает стратегию с помощью метода рулетки на основе весов эффективности
-     */
-    private fun selectStrategyByRoulette(): MutationStrategy {
-        // Случайный выбор с вероятностью exploration для чистого исследования
+    fun getLastMutationRecord(): MutationRecord? = lastMutationRecord
+
+    fun notifyNewSeedGenerated(foundAnomaly: Boolean = false) {
+        lastMutationRecord?.let { mutation ->
+            strategyStats[mutation.strategyName]?.apply {
+                seedsGenerated++
+                if (foundAnomaly) anomaliesFound++
+            }
+        }
+    }
+
+    fun notifySeedRejected() {
+        lastMutationRecord?.let { mutation ->
+            strategyStats[mutation.strategyName]?.apply {
+                failures++
+            }
+        }
+    }
+
+    private fun selectStrategy(): MutationStrategy {
         if (random.nextDouble() < explorationFactor) {
             return strategies.random()
         }
 
-        // Рассчитываем веса для каждой стратегии
         val weightedStrategies = strategies.map { strategy ->
             val name = strategy::class.simpleName ?: "Unknown"
-            val effectiveness = getEffectiveness(name)
+            val effectiveness = strategyStats[name]?.calculateEffectiveness() ?: 0.1
             strategy to effectiveness
         }
 
-        // Общая сумма весов
         val totalWeight = weightedStrategies.sumOf { it.second }
-
-        // Если все веса нулевые, выбираем случайно
         if (totalWeight <= 0) {
             return strategies.random()
         }
 
-        // Метод рулетки - выбор на основе относительных весов
-        var cumulativeWeight = 0.0
         val randomPoint = random.nextDouble() * totalWeight
+        var cumulativeWeight = 0.0
 
         for ((strategy, weight) in weightedStrategies) {
             cumulativeWeight += weight
@@ -76,61 +86,32 @@ class AdaptiveMutator(
             }
         }
 
-        // Fallback - случай, который теоретически не должен произойти
         return strategies.random()
     }
 
-    private fun getEffectiveness(strategyName: String): Double {
-        return strategyStats[strategyName]?.calculateEffectiveness() ?: 0.1
+    private fun updateStats(strategyName: String, wasSuccessful: Boolean) {
+        strategyStats.getOrPut(strategyName) { StrategyStats() }.apply {
+            totalApplications++
+            if (wasSuccessful) successfulMutations++
+        }
     }
 
-    private fun updateStats(
-        strategyName: String,
-        wasSuccessful: Boolean,
-    ) {
-        val stats = strategyStats.getOrPut(strategyName) { StrategyStats() }
-        stats.totalApplications++
-
-        if (wasSuccessful) stats.successfulMutations++
-    }
-
-    fun getLastMutationRecord(): MutationRecord? {
-        return lastMutationRecord
-    }
-
-    private fun onNewIteration() {
-        iterationsSinceLastForget++
-
-        // Периодически "забывать" часть статистики
-        if (iterationsSinceLastForget >= forgetFrequency) {
-            forgetSomeStatistics()
+    private fun refreshStatistics() {
+        if (++iterationsSinceLastForget >= forgetFrequency) {
+            applyForgetFactor()
             iterationsSinceLastForget = 0
         }
     }
 
-    private fun forgetSomeStatistics() {
+    private fun applyForgetFactor() {
         strategyStats.values.forEach { stats ->
-            stats.totalApplications = (stats.totalApplications * forgetFactor).toInt()
-            stats.successfulMutations = (stats.successfulMutations * forgetFactor).toInt()
-            stats.seedsGenerated = (stats.seedsGenerated * forgetFactor).toInt()
-            stats.anomaliesFound = (stats.anomaliesFound * forgetFactor).toInt()
-            stats.failures = (stats.failures * forgetFactor).toInt()
-        }
-    }
-
-    // Методы для обратной связи от фаззера
-    fun notifyNewSeedGenerated(foundAnomaly: Boolean = false) {
-        lastMutationRecord?.let { mutation ->
-            val stats = strategyStats[mutation.strategyName] ?: return
-            stats.seedsGenerated++
-            if (foundAnomaly) stats.anomaliesFound++
-        }
-    }
-
-    fun notifySeedRejected() {
-        lastMutationRecord?.let { mutation ->
-            val stats = strategyStats[mutation.strategyName] ?: return
-            stats.failures++
+            with(stats) {
+                totalApplications = (totalApplications * forgetFactor).toInt()
+                successfulMutations = (successfulMutations * forgetFactor).toInt()
+                seedsGenerated = (seedsGenerated * forgetFactor).toInt()
+                anomaliesFound = (anomaliesFound * forgetFactor).toInt()
+                failures = (failures * forgetFactor).toInt()
+            }
         }
     }
 }

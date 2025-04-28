@@ -3,6 +3,7 @@ package core.seed
 import core.mutation.MutationRecord
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
+import infrastructure.performance.entity.SignificanceLevel
 import kotlin.math.max
 
 /**
@@ -31,7 +32,7 @@ data class Seed(
         bytecodeEntry,
         mutationHistory,
         calculateEnergy(interestingness),
-        generateSeedDescription("", anomalies, iteration),
+        generateSeedDescription(SignificanceLevel.NOT_SIGNIFICANT, "", anomalies, iteration),
         interestingness,
         anomalies,
         iteration,
@@ -39,6 +40,7 @@ data class Seed(
     )
 
     fun updateWithVerificationResults(
+        significanceLevel: SignificanceLevel,
         confirmedAnomalies: List<PerformanceAnomalyGroup>,
         newInterestingness: Double
     ) {
@@ -46,7 +48,7 @@ data class Seed(
         interestingness = newInterestingness
         energy = calculateEnergy(newInterestingness)
         verified = confirmedAnomalies.isNotEmpty()
-        description = generateSeedDescription(description, anomalies, iteration)
+        description = generateSeedDescription(significanceLevel, description, anomalies, iteration)
     }
 
     override fun equals(other: Any?): Boolean {
@@ -68,12 +70,13 @@ data class Seed(
         }
 
         fun generateSeedDescription(
+            significanceLevel: SignificanceLevel,
             oldDescription: String,
             anomalies: List<PerformanceAnomalyGroup>,
             iteration: Int
         ): String {
             if (anomalies.isEmpty()) {
-                return oldDescription + "_Unverified"
+                return oldDescription.clearSignificanceLevel() + "_$significanceLevel"
             }
 
             val types = anomalies.map { it.anomalyType }.distinct().joinToString("_")
@@ -90,7 +93,14 @@ data class Seed(
                 if (anomalies.any { it.anomalyType == AnomalyGroupType.JIT }) add("_jit")
             }
 
-            return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}"
+            return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}_${significanceLevel}"
+        }
+
+        private fun String.clearSignificanceLevel(): String {
+            return this
+                .replace("_" + SignificanceLevel.NOT_SIGNIFICANT.toString(), "")
+                .replace("_" + SignificanceLevel.SEED_EVOLUTION.toString(), "")
+                .replace("_" + SignificanceLevel.REPORTING.toString(), "")
         }
     }
 }

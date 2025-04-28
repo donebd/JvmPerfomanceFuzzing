@@ -1,6 +1,5 @@
 package core.mutation
 
-import core.mutation.strategy.common.MutationResult
 import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
 
@@ -9,12 +8,6 @@ class SimpleMutator(
     private val strategies: List<MutationStrategy>,
 ): Mutator {
 
-    /**
-     * Мутирует байт-код JVM, гарантируя валидность результирующего байт-кода.
-     *
-     * @param bytecode исходный байт-код.
-     * @return валидный мутированный байт-код.
-     */
     override fun mutate(bytecode: ByteArray, className: String, packageName: String): ByteArray {
         val jimpleCode = jimpleTranslator.toJimple(bytecode, className)
 

@@ -1,10 +1,21 @@
 package core.mutation
 
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
+/**
+ * Запись о применённой мутации к исходному коду.
+ *
+ * @property parentSeedDescription Описание родительского сида
+ * @property strategyName Название применённой стратегии мутации
+ * @property timestamp Временная метка выполнения мутации
+ */
 data class MutationRecord(
-    val parentSeedDescription: String,     // Описание родительского сида
-    val strategyName: String,              // Название примененной стратегии
-    val timestamp: String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-)
+    val parentSeedDescription: String,
+    val strategyName: String,
+    val timestamp: String = LocalDateTime.now().format(TIMESTAMP_FORMATTER)
+) {
+    companion object {
+        private val TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    }
+}

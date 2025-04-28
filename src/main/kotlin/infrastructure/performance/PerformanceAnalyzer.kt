@@ -1,39 +1,26 @@
 package infrastructure.performance
 
-import infrastructure.jit.JITAnalyzer
 import infrastructure.jvm.JvmExecutor
 import infrastructure.performance.anomaly.JITAnomalyData
-import infrastructure.performance.anomaly.PerformanceAnomalyGroup
+import infrastructure.performance.entity.AnalysisResult
+import infrastructure.performance.entity.ExtendedAnalysisResult
 import infrastructure.performance.entity.PerformanceMetrics
 import infrastructure.performance.entity.SignificanceLevel
 
+/**
+ * Анализатор производительности для выявления аномалий между JVM.
+ */
 interface PerformanceAnalyzer {
     /**
-     * Анализирует метрики производительности и выявляет аномалии.
+     * Анализирует метрики производительности с автоопределением уровня значимости.
+     * Последовательно применяет уровни от REPORTING до SEED_EVOLUTION.
      *
-     * @param metrics список пар JvmExecutor и соответствующих метрик
-     * @param significanceLevel уровень значимости для анализа
-     * @return список групп аномалий
+     * @return структурированный результат с аномалиями и метаданными
      */
-    fun analyze(
-        metrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
-        significanceLevel: SignificanceLevel
-    ): List<PerformanceAnomalyGroup>
+    fun analyze(metrics: List<Pair<JvmExecutor, PerformanceMetrics>>): AnalysisResult
 
     /**
-     * Определяет, представляют ли найденные аномалии интерес.
-     */
-    fun areAnomaliesInteresting(anomalies: List<PerformanceAnomalyGroup>): Boolean
-
-    /**
-     * Рассчитывает общую интересность набора аномалий.
-     */
-    fun calculateOverallInterestingness(anomalies: List<PerformanceAnomalyGroup>): Double
-
-    /**
-     * Анализирует JIT-логи и вычисляет JIT-интересность.
-     *
-     * @return пара (JIT-интересность, JIT-данные)
+     * Анализирует JIT-логи для оценки влияния JIT-компиляции на производительность.
      */
     fun analyzeJIT(
         jvmExecutors: List<JvmExecutor>,
@@ -42,30 +29,9 @@ interface PerformanceAnalyzer {
     ): Pair<Double, JITAnomalyData?>
 
     /**
-     * Выполняет комбинированный анализ производительности и JIT.
-     *
-     * @return пара (список аномалий, (JIT-интересность, JIT-данные))
+     * Комбинированный анализ производительности и JIT-компиляции с автоопределением
+     * значимости.
      */
-    fun analyzeWithJIT(
-        metrics: List<Pair<JvmExecutor, PerformanceMetrics>>,
-        significanceLevel: SignificanceLevel
-    ): Pair<List<PerformanceAnomalyGroup>, Pair<Double, JITAnomalyData?>>
+    fun analyzeWithJIT(metrics: List<Pair<JvmExecutor, PerformanceMetrics>>): ExtendedAnalysisResult
 
-    /**
-     * Обогащает существующие аномалии данными JIT-анализа.
-     */
-    fun enrichAnomaliesWithJIT(
-        anomalies: List<PerformanceAnomalyGroup>,
-        jitData: JITAnomalyData
-    ): List<PerformanceAnomalyGroup>
-
-    /**
-     * Извлекает JIT-данные из логов и обогащает ими аномалии.
-     */
-    fun enrichAnomaliesWithJITFromLogs(
-        anomalies: List<PerformanceAnomalyGroup>,
-        jvmExecutors: List<JvmExecutor>,
-        metrics: Map<JvmExecutor, PerformanceMetrics>,
-        jitAnalyzer: JITAnalyzer
-    ): List<PerformanceAnomalyGroup>
 }

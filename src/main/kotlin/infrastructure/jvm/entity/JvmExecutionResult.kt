@@ -1,8 +1,11 @@
 package infrastructure.jvm.entity
 
+/**
+ * Результат выполнения процесса JVM.
+ */
 data class JvmExecutionResult(
-    var exitCode: Int,      // Код возврата JVM
-    val stdout: String,     // Вывод stdout
-    val stderr: String,      // Вывод stderr
+    val exitCode: Int,
+    val stdout: String,
+    val stderr: String,
     val timedOut: Boolean
 )

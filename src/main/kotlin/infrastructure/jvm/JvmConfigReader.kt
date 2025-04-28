@@ -1,18 +1,15 @@
 package infrastructure.jvm
 
-import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import infrastructure.jvm.entity.JvmConfig
 import java.io.File
 import java.io.InputStream
 
-data class JvmConfig(
-    @JsonProperty("HotSpotJvm") val hotSpotJvm: String? = null,
-    @JsonProperty("OpenJ9Jvm") val openJ9Jvm: String? = null,
-    @JsonProperty("GraalVmJvm") val graalVmJvm: String? = null,
-    @JsonProperty("AxiomJvm") val axiomJvm: String? = null,
-)
-
+/**
+ * Предоставляет пути к исполняемым файлам различных JVM на основе конфигурационного файла
+ * или автоматического поиска.
+ */
 class JvmConfigReader {
 
     private val objectMapper = ObjectMapper()
@@ -47,7 +44,6 @@ class JvmConfigReader {
         val jvmDir = File("/usr/lib/jvm/")
 
         if (jvmDir.exists() && jvmDir.isDirectory) {
-            val a = jvmDir.listFiles()
             val matchingJvm = jvmDir.listFiles()
                 ?.filter { it.isDirectory && it.name.startsWith(jvmPrefix) }
                 ?.maxByOrNull { it.name } // Берем самую новую версию

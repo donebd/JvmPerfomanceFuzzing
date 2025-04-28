@@ -1,17 +1,36 @@
 package infrastructure.jit.model
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+
 /**
  * Результат сравнения JIT-компиляции между двумя JVM.
+ * Содержит анализ различий в компиляции, влияющих на производительность.
  */
 data class JITComparisonResult(
-    val fasterJvmProfile: JITProfile,
-    val slowerJvmProfile: JITProfile,
-    val compilationEfficiencyDiff: Double,    // Разница в эффективности компиляции
+    @JsonIgnore val fasterJvmProfile: JITProfile,
+    @JsonIgnore val slowerJvmProfile: JITProfile,
+
+    val fasterJvmName: String,
+    val slowerJvmName: String,
+
+    /** Разница в эффективности компиляции между JVM (%) */
+    val compilationEfficiencyDiff: Double,
+
+    /** Оптимизации, выполненные только в быстрой JVM */
     val uniqueOptimizationsInFaster: List<String>,
+
+    /** Оптимизации, выполненные только в медленной JVM */
     val uniqueOptimizationsInSlower: List<String>,
-    val inliningRateDiff: Double,             // Разница в проценте инлайнинга
-    val compilationSpeedDiff: Double,         // Разница во времени компиляции
-    val jitRelatedProbability: Double,        // Вероятность, что разница связана с JIT
-    val analysisExplanation: String,           // Объяснение анализа
+
+    /** Разница в уровне инлайнинга между JVM (%) */
+    val inliningRateDiff: Double,
+
+    /** Разница в скорости компиляции между JVM (%) */
+    val compilationSpeedDiff: Double,
+
+    /** Оценка вероятности что различие в производительности связано с JIT [0.0-1.0] */
+    val jitRelatedProbability: Double,
+
+    val analysisExplanation: String,
     val hotMethods: List<HotMethodAnalysis> = emptyList()
 )

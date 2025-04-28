@@ -9,8 +9,8 @@ import infrastructure.jvm.JITLoggingOptionsProvider
 import infrastructure.jvm.JvmExecutor
 import infrastructure.performance.entity.PerformanceMetrics
 import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Анализатор JIT-компиляции для сравнения и выявления различий
@@ -108,6 +108,8 @@ class JITAnalyzer(val jitOptionsProvider: JITLoggingOptionsProvider) {
         return JITComparisonResult(
             fasterJvmProfile = fasterProfile,
             slowerJvmProfile = slowerProfile,
+            fasterJvmName = fasterProfile.jvmName,
+            slowerJvmName = slowerProfile.jvmName,
             compilationEfficiencyDiff = compilationEfficiencyDiff,
             uniqueOptimizationsInFaster = uniqueMethods.first,
             uniqueOptimizationsInSlower = uniqueMethods.second,

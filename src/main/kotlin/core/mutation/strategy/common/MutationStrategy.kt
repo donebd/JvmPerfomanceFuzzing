@@ -4,45 +4,48 @@ import infrastructure.translator.JimpleTranslator
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.util.CheckClassAdapter
 import soot.Body
-import soot.SootClass
-import soot.SootMethod
 import java.io.PrintWriter
 import java.io.StringWriter
 
-data class MutationResult(val jimpleCode: String, val hadError: Boolean)
-
+/**
+ * Базовый класс для всех стратегий мутации байткода.
+ * Обеспечивает шаблонный метод для применения мутаций, выбор метода для мутации и проверку валидности.
+ */
 abstract class MutationStrategy(private val jimpleTranslator: JimpleTranslator) {
 
+    /**
+     * Применяет стратегию мутации к Jimple-коду.
+     */
     fun apply(jimpleCode: String, className: String, packageName: String): MutationResult {
-        try {
+        return try {
             val sootClass = jimpleTranslator.parseSootClass(jimpleCode, className, packageName)
-            val method = selectRandomMethod(sootClass) ?: return MutationResult(jimpleCode, true)
+
+            val method = sootClass.methods
+                .filter { it.hasActiveBody() && !it.name.startsWith("<") }
+                .randomOrNull() ?: return MutationResult(jimpleCode, true)
 
             applyMutation(method.activeBody)
 
             val bytecode = jimpleTranslator.toBytecode(sootClass)
-            if (!isValidBytecode(bytecode)) {
+            if (!validateBytecode(bytecode)) {
                 return MutationResult(jimpleCode, true)
             }
 
-            return MutationResult(
+            MutationResult(
                 jimpleTranslator.toJimple(bytecode, sootClass.shortName).data,
                 false
             )
         } catch (e: Exception) {
-            return MutationResult(jimpleCode, true)
+            MutationResult(jimpleCode, true)
         }
     }
 
+    /**
+     * Реализуется в конкретных стратегиях для применения специфичных мутаций.
+     */
     protected abstract fun applyMutation(body: Body)
 
-    private fun selectRandomMethod(sootClass: SootClass): SootMethod? {
-        return sootClass.methods
-            .filter { it.hasActiveBody() && !it.name.startsWith("<") }
-            .randomOrNull()
-    }
-
-    private fun isValidBytecode(bytecode: ByteArray): Boolean {
+    private fun validateBytecode(bytecode: ByteArray): Boolean {
         val errorCollector = StringWriter()
         CheckClassAdapter.verify(
             ClassReader(bytecode),
