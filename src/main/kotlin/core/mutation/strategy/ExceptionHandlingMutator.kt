@@ -4,11 +4,25 @@ import core.mutation.strategy.common.Block
 import core.mutation.strategy.common.BlockFinder
 import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
-import soot.*
+import soot.Body
+import soot.Local
+import soot.RefType
+import soot.Scene
 import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, добавляющая конструкции обработки исключений (try-catch)
+ * в Java-байткод. Оборачивает существующие блоки кода или отдельные операторы в
+ * блоки try-catch, которые перехватывают RuntimeException.
+ *
+ * Эта мутация позволяет тестировать различия в производительности механизмов
+ * обработки исключений между реализациями JVM. Несмотря на то, что добавленные
+ * обработчики исключений никогда не выполняют полезную работу (исключения не
+ * выбрасываются), они могут существенно влиять на оптимизации JIT-компилятора
+ * и общую производительность.
+ */
 class ExceptionHandlingMutator(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

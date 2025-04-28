@@ -9,6 +9,12 @@ import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая добавляет избыточные вычисления в байткод без изменения
+ * функциональности программы. Эта стратегия вставляет операции арифметических вычислений
+ * над константами, результаты которых сохраняются в новых локальных переменных, но никогда
+ * не используются впоследствии.
+ */
 class RedundantComputationMutator(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

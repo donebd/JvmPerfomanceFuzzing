@@ -3,10 +3,17 @@ package core.mutation.strategy
 import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
 import soot.*
-import soot.jimple.*
+import soot.jimple.AssignStmt
+import soot.jimple.IdentityStmt
+import soot.jimple.Jimple
 import kotlin.math.min
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая добавляет операции упаковки (boxing) и распаковки (unboxing)
+ * примитивных типов в Java-байткоде. Заменяет прямые присваивания примитивных значений
+ * на эквивалентную последовательность операций с использованием классов-оберток.
+ */
 class BoxingUnboxingMutationStrategy(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

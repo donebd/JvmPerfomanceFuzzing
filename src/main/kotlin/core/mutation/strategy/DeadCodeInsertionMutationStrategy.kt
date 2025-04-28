@@ -2,11 +2,29 @@ package core.mutation.strategy
 
 import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
-import soot.*
+import soot.ArrayType
+import soot.Body
+import soot.IntType
 import soot.javaToJimple.DefaultLocalGenerator
-import soot.jimple.*
+import soot.jimple.IdentityStmt
+import soot.jimple.IntConstant
+import soot.jimple.Jimple
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая вставляет "мертвый код" в Java-байткод — код, который
+ * не влияет на функциональный результат программы, но может создавать различную
+ * нагрузку на оптимизаторы в разных реализациях JVM.
+ *
+ * Стратегия реализует несколько типов вставки мертвого кода:
+ * - Неиспользуемые математические вычисления
+ * - Циклы с инвариантными условиями
+ * - Операции с массивами, результаты которых не используются
+ * - Ветви кода с заведомо ложными условиями
+ *
+ * Эта мутация позволяет тестировать эффективность анализа мертвого кода и
+ * оптимизаций удаления недостижимого кода в различных JVM.
+ */
 class DeadCodeInsertionMutationStrategy(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

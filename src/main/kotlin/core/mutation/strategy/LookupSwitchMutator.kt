@@ -2,11 +2,23 @@ package core.mutation.strategy
 
 import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
-import soot.*
+import soot.Body
+import soot.IntType
+import soot.PatchingChain
 import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая вставляет конструкции lookupswitch (оператор switch в байткоде)
+ * в Java-код. Создает новую локальную переменную с убывающим счетчиком и оператор switch,
+ * который направляет выполнение кода на различные метки в зависимости от значения счетчика.
+ *
+ * Эта мутация позволяет тестировать различия в эффективности таблиц переходов и диспетчеризации
+ * lookupswitch между разными реализациями JVM. Особенно интересна для выявления различий
+ * в оптимизациях условных переходов, когда JIT-компилятор принимает решение о применении
+ * таблиц переходов или последовательных сравнений.
+ */
 class LookupSwitchMutator(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

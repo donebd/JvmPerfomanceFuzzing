@@ -7,6 +7,17 @@ import soot.RefType
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая добавляет избыточные проверки на null для ссылочных переменных.
+ * Вставляет условные операторы, проверяющие объекты на null или не-null, но сконструированные
+ * таким образом, что они не влияют на логику выполнения программы.
+ *
+ * Эта стратегия создаёт конструкции вида:
+ * ```
+ * if (объект == null) { } // или if (объект != null) { }
+ * // следующая инструкция
+ * ```
+ */
 class RedundantNullCheckMutator(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

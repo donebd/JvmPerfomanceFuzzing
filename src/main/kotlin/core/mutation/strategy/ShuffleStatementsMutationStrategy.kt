@@ -7,6 +7,11 @@ import soot.Value
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая переставляет порядок независимых инструкций в байткоде.
+ * Выбирает блок последовательных независимых инструкций и случайным образом
+ * перемешивает их порядок
+ */
 class ShuffleStatementsMutationStrategy(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {

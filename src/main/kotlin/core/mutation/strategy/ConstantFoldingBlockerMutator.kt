@@ -8,6 +8,14 @@ import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
 import kotlin.random.Random
 
+/**
+ * Стратегия мутации, которая блокирует оптимизацию свертки констант (constant folding) в JVM.
+ * Вставляет в код выражения, которые теоретически могли бы быть оптимизированы на этапе
+ * компиляции, но структурированы таким образом, чтобы JVM не смогла применить эту оптимизацию.
+ *
+ * Эта стратегия полезна для тестирования различий в производительности JVM при работе с кодом,
+ * который препятствует стандартным оптимизациям времени компиляции.
+ */
 class ConstantFoldingBlockerMutator(
     jimpleTranslator: JimpleTranslator
 ) : MutationStrategy(jimpleTranslator) {
