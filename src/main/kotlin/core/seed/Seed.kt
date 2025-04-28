@@ -96,7 +96,7 @@ data class Seed(
             return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}_${significanceLevel}"
         }
 
-        private fun String.clearSignificanceLevel(): String {
+        fun String.clearSignificanceLevel(): String {
             return this
                 .replace("_" + SignificanceLevel.NOT_SIGNIFICANT.toString(), "")
                 .replace("_" + SignificanceLevel.SEED_EVOLUTION.toString(), "")

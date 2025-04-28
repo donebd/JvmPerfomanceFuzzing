@@ -2,6 +2,7 @@ package infrastructure.performance.anomaly
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import core.seed.Seed
+import core.seed.Seed.Companion.clearSignificanceLevel
 import infrastructure.jit.JITReportGenerator
 import java.io.File
 import java.nio.file.Files
@@ -60,7 +61,7 @@ class FileAnomalyRepository(
 
     private fun createSeedDirectoryName(seed: Seed): String {
         val bytecodeHash = seed.bytecodeEntry.bytecode.contentHashCode().toString(16)
-        return "seed_${seed.description.replace(" ", "_")}_${bytecodeHash}"
+        return "seed_${seed.description.replace(" ", "_").clearSignificanceLevel()}_${bytecodeHash}"
     }
 
     private fun saveSeedInfo(seed: Seed, seedDir: File, timestamp: String) {
@@ -86,10 +87,11 @@ class FileAnomalyRepository(
     }
 
     private fun saveAnomalies(seed: Seed, directories: DirectoryStructure, timestamp: String) {
+        val timestampString = timestamp.replace(" ", "_").replace(":", "-")
 
         seed.anomalies.forEachIndexed { index, anomalyGroup ->
             val filePrefix = generateAnomalyFilePrefix(anomalyGroup, index)
-            val anomalyFile = File(directories.anomaliesDir, "anomaly_${filePrefix}_$timestamp.json")
+            val anomalyFile = File(directories.anomaliesDir, "anomaly_${filePrefix}_$timestampString.json")
 
             val anomalyJson = if (anomalyGroup.anomalyType == AnomalyGroupType.JIT) {
                 objectMapper.writeValueAsString(anomalyGroup)
@@ -111,14 +113,16 @@ class FileAnomalyRepository(
     private fun copyJmhReports(seed: Seed, jmhReportsDir: File): Int {
         var reportsCopied = 0
 
-        seed.anomalies.forEach { anomalyGroup ->
+        val anomalyGroup = seed.anomalies.find { it.anomalyType !== AnomalyGroupType.JIT }
+        anomalyGroup?.let {
             val allJvms = anomalyGroup.fasterJvms + anomalyGroup.slowerJvms
 
             allJvms.forEach { jvmResult ->
                 jvmResult.metrics.jmhReportPath?.let { reportPath ->
                     val sourceFile = File(reportPath)
                     if (sourceFile.exists()) {
-                        val targetFileName = "jmh_${anomalyGroup.anomalyType.name.lowercase()}_${jvmResult.jvmName}.json"
+                        val targetFileName =
+                            "jmh_${anomalyGroup.anomalyType.name.lowercase()}_${jvmResult.jvmName}.json"
                         val targetFile = File(jmhReportsDir, targetFileName)
 
                         sourceFile.copyTo(targetFile, overwrite = true)
