@@ -4,9 +4,10 @@ import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
 import soot.Body
 import soot.Local
-import soot.PatchingChain
 import soot.Value
+import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
+import kotlin.math.min
 
 /**
  * Стратегия мутации, которая изменяет направление выполнения циклов в Java-байткоде.
@@ -27,7 +28,9 @@ class LoopDirectionReverserMutator(
     override fun applyMutation(body: Body) {
         val loops = findSimpleLoops(body)
         val target = loops.randomOrNull() ?: return
+
         reverseLoop(body, target)
+        body.validate()
     }
 
     data class SimpleLoop(
@@ -43,41 +46,55 @@ class LoopDirectionReverserMutator(
         val loops = mutableListOf<SimpleLoop>()
 
         for (i in 0 until units.size - 2) {
-            val init = units[i]
-            val cond = units[i + 1]
-            val incr = units[i + 2]
+            val stmt = units[i]
 
-            if (init !is AssignStmt || cond !is IfStmt || incr !is AssignStmt) continue
-            val varInit = init.leftOp as? Local ?: continue
-            if (init.rightOp !is IntConstant) continue
+            if (stmt !is AssignStmt) continue
+            val loopVar = stmt.leftOp as? Local ?: continue
 
-            val condExpr = cond.condition as? BinopExpr ?: continue
+            var conditionStmt: IfStmt? = null
+            var incrementStmt: AssignStmt? = null
+            var bound: Value? = null
 
-            // Условие должно быть i < bound или i <= bound
-            val isForward = when (condExpr) {
-                is LtExpr, is LeExpr -> {
-                    condExpr.op1 == varInit || condExpr.op2 == varInit
+            for (j in i + 1 until min(i + 10, units.size)) {
+                val nextStmt = units[j]
+                if (nextStmt is IfStmt) {
+                    val condition = nextStmt.condition as? BinopExpr ?: continue
+
+                    // Проверяем, что условие подходит для прямого цикла (i < bound или i <= bound)
+                    if (condition is LtExpr || condition is LeExpr) {
+                        if (condition.op1 == loopVar) {
+                            bound = condition.op2
+                            conditionStmt = nextStmt
+                            break
+                        } else if (condition.op2 == loopVar) {
+                            bound = condition.op1
+                            conditionStmt = nextStmt
+                            break
+                        }
+                    }
                 }
-
-                else -> false
-            }
-            if (!isForward) continue
-
-            val rhs = incr.rightOp as? AddExpr ?: continue
-            val isIncrement = rhs.op1 == varInit &&
-                    (rhs.op2 is IntConstant && (rhs.op2 as IntConstant).value == 1)
-
-            if (!isIncrement || incr.leftOp != varInit) continue
-
-            val bound = when (condExpr) {
-                is LtExpr, is LeExpr -> {
-                    if (condExpr.op1 == varInit) condExpr.op2 else condExpr.op1
-                }
-
-                else -> continue
             }
 
-            loops += SimpleLoop(init, cond, incr, varInit, bound)
+            if (conditionStmt == null || bound == null) continue
+
+            for (j in i + 1 until min(i + 15, units.size)) {
+                val nextStmt = units[j]
+                if (nextStmt is AssignStmt && nextStmt.leftOp == loopVar) {
+                    val rhs = nextStmt.rightOp
+
+                    if (rhs is AddExpr && rhs.op1 == loopVar) {
+                        val increment = rhs.op2
+                        if (increment is IntConstant && increment.value == 1) {
+                            incrementStmt = nextStmt
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (incrementStmt != null) {
+                loops.add(SimpleLoop(stmt, conditionStmt, incrementStmt, loopVar, bound))
+            }
         }
 
         return loops
@@ -85,32 +102,60 @@ class LoopDirectionReverserMutator(
 
     private fun reverseLoop(body: Body, loop: SimpleLoop) {
         val units = body.units
+        val localGen = DefaultLocalGenerator(body)
 
-        // Изменяем init: i = bound - 1
-        val newInit = Jimple.v().newAssignStmt(
-            loop.loopVar,
-            Jimple.v().newSubExpr(loop.bound, IntConstant.v(1))
-        )
-        units.swap(loop.initStmt, newInit)
+        val boundVar = if (loop.bound is IntConstant) {
+            IntConstant.v(loop.bound.value - 1)
+        } else {
+            val tmpBound = localGen.generateLocal(loop.bound.type)
 
-        // Изменяем условие: i >= 0
+            val assignBound = Jimple.v().newAssignStmt(tmpBound, loop.bound)
+            units.insertBefore(assignBound, loop.initStmt)
+
+            val boundMinusOne = localGen.generateLocal(loop.bound.type)
+            val subtractStmt = Jimple.v().newAssignStmt(
+                boundMinusOne,
+                Jimple.v().newSubExpr(tmpBound, IntConstant.v(1))
+            )
+            units.insertAfter(subtractStmt, assignBound)
+
+            boundMinusOne
+        }
+
+        val newInit = Jimple.v().newAssignStmt(loop.loopVar, boundVar)
+
         val newCond = Jimple.v().newIfStmt(
             Jimple.v().newGeExpr(loop.loopVar, IntConstant.v(0)),
-            loop.conditionStmt.target // same target
+            loop.conditionStmt.target
         )
-        units.swap(loop.conditionStmt, newCond)
 
-        // Изменяем инкремент на декремент: i = i - 1
         val newIncr = Jimple.v().newAssignStmt(
             loop.loopVar,
             Jimple.v().newSubExpr(loop.loopVar, IntConstant.v(1))
         )
-        units.swap(loop.incrementStmt, newIncr)
+
+        safelyReplaceUnit(units, loop.initStmt, newInit)
+        safelyReplaceUnit(units, loop.conditionStmt, newCond)
+        safelyReplaceUnit(units, loop.incrementStmt, newIncr)
     }
 
-    // Утилита для замены инструкции
-    private fun PatchingChain<soot.Unit>.swap(oldUnit: soot.Unit, newUnit: soot.Unit) {
-        insertBefore(newUnit, oldUnit)
-        remove(oldUnit)
+    private fun safelyReplaceUnit(units: soot.util.Chain<soot.Unit>, oldUnit: soot.Unit, newUnit: soot.Unit) {
+        try {
+            val prevUnit = units.getPredOf(oldUnit)
+            val nextUnit = units.getSuccOf(oldUnit)
+
+            units.remove(oldUnit)
+
+            if (prevUnit != null) {
+                units.insertAfter(newUnit, prevUnit)
+            } else if (nextUnit != null) {
+                units.insertBefore(newUnit, nextUnit)
+            } else {
+                units.add(newUnit)
+            }
+        } catch (e: Exception) {
+            units.insertBefore(newUnit, oldUnit)
+            units.remove(oldUnit)
+        }
     }
 }

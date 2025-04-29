@@ -4,106 +4,116 @@ import core.mutation.strategy.common.MutationStrategy
 import infrastructure.translator.JimpleTranslator
 import soot.Body
 import soot.IntType
-import soot.PatchingChain
 import soot.javaToJimple.DefaultLocalGenerator
 import soot.jimple.*
-import kotlin.random.Random
+import java.util.*
 
 /**
- * Стратегия мутации, которая вставляет конструкции lookupswitch (оператор switch в байткоде)
- * в Java-код. Создает новую локальную переменную с убывающим счетчиком и оператор switch,
- * который направляет выполнение кода на различные метки в зависимости от значения счетчика.
- *
- * Эта мутация позволяет тестировать различия в эффективности таблиц переходов и диспетчеризации
- * lookupswitch между разными реализациями JVM. Особенно интересна для выявления различий
- * в оптимизациях условных переходов, когда JIT-компилятор принимает решение о применении
- * таблиц переходов или последовательных сравнений.
+ * Стратегия мутации, добавляющая конструкцию switch (lookup),
+ * которая перенаправляет выполнение программы в случайные места метода
  */
-class LookupSwitchMutator(
-    jimpleTranslator: JimpleTranslator
-) : MutationStrategy(jimpleTranslator) {
+class LookupSwitchMutator(jimpleTranslator: JimpleTranslator) : MutationStrategy(jimpleTranslator) {
 
     companion object {
         private const val LOOP_LIMIT = 5
     }
 
     override fun applyMutation(body: Body) {
-        val units = body.units
-        val validStmts = units.filterNot {
-            it is IdentityStmt || it is ReturnStmt || it is ReturnVoidStmt
-        }
+        try {
+            val units = body.units
 
-        if (validStmts.size < 4) return
+            val validStmts = units.filterNot { unit ->
+                unit is IdentityStmt || unit is ReturnStmt || unit is ReturnVoidStmt
+            }.toList()
 
-        val hookPoint = validStmts.random()
-        val localGen = DefaultLocalGenerator(body)
-        val switchVar = localGen.generateLocal(IntType.v())
-        body.locals.add(switchVar)
+            if (validStmts.size < 4) return
 
-        val (labels, lookupValues) = createSwitchTargets(units, validStmts)
-        if (labels.isEmpty()) return
+            val random = Random()
+            val hookingPointIndex = random.nextInt(validStmts.size - 1)
+            val hookingPoint = validStmts[hookingPointIndex]
 
-        val defaultLabel = createDefaultTarget(units, validStmts, labels.toSet())
+            val localGen = DefaultLocalGenerator(body)
+            val switchVar = localGen.generateLocal(IntType.v())
 
-        val switchStmt = Jimple.v().newLookupSwitchStmt(switchVar, lookupValues, labels, defaultLabel)
-        val skipSwitch = Jimple.v().newNopStmt()
+            val caseCount = random.nextInt(3) + 1
+            val lookupValues = ArrayList<IntConstant>()
+            val labels = ArrayList<Stmt>()
+            val selectedTargetPoints = HashSet<Stmt>()
 
-        val assignInit = Jimple.v().newAssignStmt(switchVar, IntConstant.v(LOOP_LIMIT))
-        val decrement = Jimple.v().newAssignStmt(switchVar, Jimple.v().newSubExpr(switchVar, IntConstant.v(1)))
-        val condition = Jimple.v().newIfStmt(Jimple.v().newLeExpr(switchVar, IntConstant.v(0)), skipSwitch)
+            var counter = LOOP_LIMIT
+            for (i in 0 until caseCount) {
+                lookupValues.add(IntConstant.v(--counter))
 
-        units.insertBefore(assignInit, validStmts.first())
-        units.insertAfter(decrement, hookPoint)
-        units.insertAfter(condition, decrement)
-        units.insertAfter(switchStmt, condition)
-        units.insertAfter(skipSwitch, switchStmt)
+                var targetPoint: Stmt
+                var attempts = 0
+                do {
+                    targetPoint = validStmts[random.nextInt(validStmts.size)] as Stmt
+                    attempts++
+                } while (selectedTargetPoints.contains(targetPoint) && attempts < 5)
 
-        body.validate()
-    }
+                selectedTargetPoints.add(targetPoint)
 
-    private fun createSwitchTargets(
-        units: PatchingChain<soot.Unit>,
-        validStmts: List<soot.Unit>
-    ): Pair<List<Stmt>, List<IntConstant>> {
-        val caseCount = Random.nextInt(1, 4)
-        val selected = mutableSetOf<Stmt>()
-        val labels = mutableListOf<Stmt>()
-        val values = mutableListOf<IntConstant>()
-
-        repeat(caseCount) {
-            val value = LOOP_LIMIT - it - 1
-            val stmt = (0..5)
-                .map { validStmts.random() as Stmt }
-                .firstOrNull { it !in selected } ?: return@repeat
-
-            selected += stmt
-
-            val nop = Jimple.v().newNopStmt()
-            if (units.contains(stmt)) {
-                units.insertBefore(nop, stmt)
-                labels += nop
-                values += IntConstant.v(value)
+                val nop = Jimple.v().newNopStmt()
+                if (units.contains(targetPoint)) {
+                    units.insertBefore(nop, targetPoint)
+                    labels.add(nop)
+                }
             }
+
+            if (labels.isEmpty()) return
+
+            var defaultTargetPoint: Stmt
+            var attempts = 0
+            do {
+                defaultTargetPoint = validStmts[random.nextInt(validStmts.size)] as Stmt
+                attempts++
+            } while (selectedTargetPoints.contains(defaultTargetPoint) && attempts < 5)
+
+            val defaultNop = Jimple.v().newNopStmt()
+            if (units.contains(defaultTargetPoint)) {
+                units.insertBefore(defaultNop, defaultTargetPoint)
+            } else {
+                if (units.size > 0) {
+                    units.addLast(defaultNop)
+                } else {
+                    units.add(defaultNop)
+                }
+            }
+
+            val switchStmt = Jimple.v().newLookupSwitchStmt(
+                switchVar, lookupValues, labels, defaultNop
+            )
+
+            val skipSwitch = Jimple.v().newNopStmt()
+
+            val assignStmt = Jimple.v().newAssignStmt(
+                switchVar, IntConstant.v(LOOP_LIMIT)
+            )
+
+            val subExpr = Jimple.v().newSubExpr(switchVar, IntConstant.v(1))
+            val subStmt = Jimple.v().newAssignStmt(switchVar, subExpr)
+
+            val condition = Jimple.v().newLeExpr(switchVar, IntConstant.v(0))
+            val ifStmt = Jimple.v().newIfStmt(condition, skipSwitch)
+
+            if (units.contains(validStmts.first())) {
+                units.insertBefore(assignStmt, validStmts.first())
+            } else {
+                units.addFirst(assignStmt)
+            }
+
+            if (units.contains(hookingPoint)) {
+                units.insertAfter(skipSwitch, hookingPoint)
+                units.insertAfter(switchStmt, hookingPoint)
+                units.insertAfter(ifStmt, hookingPoint)
+                units.insertAfter(subStmt, hookingPoint)
+            }
+
+            body.validate()
+
+        } catch (e: Exception) {
+            println("Error in LookupSwitchMutator: ${e.message}")
+            e.printStackTrace()
         }
-
-        return labels to values
-    }
-
-    private fun createDefaultTarget(
-        units: PatchingChain<soot.Unit>,
-        validStmts: List<soot.Unit>,
-        exclude: Set<Stmt>
-    ): Stmt {
-        val stmt = (0..5)
-            .map { validStmts.random() as Stmt }
-            .firstOrNull { it !in exclude } ?: validStmts.last() as Stmt
-
-        val nop = Jimple.v().newNopStmt()
-        if (units.contains(stmt)) {
-            units.insertBefore(nop, stmt)
-        } else {
-            units.addLast(nop)
-        }
-        return nop
     }
 }
