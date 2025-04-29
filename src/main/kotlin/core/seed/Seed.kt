@@ -17,6 +17,7 @@ data class Seed(
     var description: String,
     var interestingness: Double = 0.0,
     var anomalies: List<PerformanceAnomalyGroup> = emptyList(),
+    var initial: Boolean = false,
     val iteration: Int = 0,
     var verified: Boolean = false
 ) {
@@ -35,6 +36,7 @@ data class Seed(
         generateSeedDescription(SignificanceLevel.NOT_SIGNIFICANT, "", anomalies, iteration),
         interestingness,
         anomalies,
+        false,
         iteration,
         verified
     )

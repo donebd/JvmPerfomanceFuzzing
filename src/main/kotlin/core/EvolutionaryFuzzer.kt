@@ -55,8 +55,6 @@ class EvolutionaryFuzzer(
             }
 
             val selectedSeed = seedManager.selectSeedForMutation() ?: break
-            seedManager.decrementSeedEnergy(selectedSeed)
-
             println("Итерация #${iterations + 1} | Используем сид: ${selectedSeed.description} | " +
                     "Энергия: ${selectedSeed.energy} | Интересность: ${selectedSeed.interestingness}")
 
@@ -66,6 +64,7 @@ class EvolutionaryFuzzer(
                 iterations++
                 continue
             }
+            seedManager.decrementSeedEnergy(selectedSeed)
 
             // Измерение производительности
             val bytecodeEntry = selectedSeed.bytecodeEntry
@@ -113,7 +112,8 @@ class EvolutionaryFuzzer(
                 bytecodeEntry = entry,
                 mutationHistory = mutableListOf(),
                 energy = initialEnergy,
-                description = entry.description.ifEmpty { "initial_$index" }
+                description = entry.description.ifEmpty { "initial_$index" },
+                initial = true
             )
         }
 

@@ -10,10 +10,20 @@ import kotlin.math.max
  * восстанавливает полезные сиды и удаляет неэффективные при переполнении пула.
  */
 class EnergySeedManager(
-    private val maxPoolSize: Int = 100,
-    private val minEnergyThreshold: Int = 3,
-    private val energyBoost: Int = 5
+    private val maxPoolSize: Int = DEFAULT_MAX_POOL_SIZE,
+    private val minEnergyThreshold: Int = DEFAULT_MIN_ENERGY_THRESHOLD,
+    private val energyBoost: Int = DEFAULT_ENERGY_BOOST
 ) : SeedManager {
+
+    companion object {
+        const val DEFAULT_MAX_POOL_SIZE = 100
+        const val DEFAULT_MIN_ENERGY_THRESHOLD = 4
+        const val DEFAULT_ENERGY_BOOST = 5
+
+        const val RANDOM_SELECTION_PROBABILITY = 0.1
+        const val ENERGY_BOOST_THRESHOLD = 0.3
+        const val VERIFICATION_BONUS = 2.0
+    }
 
     private val seedPool = mutableSetOf<Seed>()
     private val initialSeeds = mutableListOf<Seed>()
@@ -24,8 +34,9 @@ class EnergySeedManager(
 
     override fun addInitialSeeds(seeds: List<Seed>): Int {
         return seeds.count {
-            initialSeeds.add(it.copy())
-            addSeed(it)
+            val initialCopy = it.copy().apply { initial = true }
+            initialSeeds.add(initialCopy)
+            addSeed(initialCopy)
         }
     }
 
@@ -39,21 +50,25 @@ class EnergySeedManager(
     }
 
     override fun selectSeedForMutation(): Seed? {
-        if (seedPool.none { it.energy > 0 }) boostSeedEnergy()
-
         removeDeadSeeds()
 
         if (seedPool.isEmpty()) restoreInitialSeeds()
         if (seedPool.isEmpty()) return null
 
-        if (seedPool.sumOf { it.energy } < seedPool.size) {
-            seedPool.forEach { it.energy += energyBoost }
+        val notInitialSeeds = seedPool.filter { !it.initial }
+        if (notInitialSeeds.sumOf { it.energy } * ENERGY_BOOST_THRESHOLD < notInitialSeeds.size) {
+            boostSeedEnergy()
+        }
+
+        val initialSeeds = seedPool.filter { it.initial }
+        if (initialSeeds.sumOf { it.energy } * ENERGY_BOOST_THRESHOLD < initialSeeds.size) {
+            boostInitialSeeds()
         }
 
         val activeSeeds = seedPool.filter { it.energy > 0 }
         if (activeSeeds.isEmpty()) return null
 
-        return if (random.nextDouble() < 0.1) {
+        return if (random.nextDouble() < RANDOM_SELECTION_PROBABILITY) {
             activeSeeds.random()
         } else {
             selectWeightedByEnergy(activeSeeds)
@@ -72,14 +87,14 @@ class EnergySeedManager(
 
     private fun prunePool() {
         val toRemove = seedPool
-            .filterNot { it.verified || isInitial(it) }
+            .filterNot { it.verified || it.initial }
             .sortedBy { it.energy * (1.0 + it.interestingness) }
             .take(seedPool.size - maxPoolSize)
             .toMutableList()
 
         if (toRemove.size < seedPool.size - maxPoolSize) {
             val additional = seedPool
-                .filter { it.verified && !isInitial(it) }
+                .filter { it.verified && !it.initial }
                 .sortedBy { it.energy * (1.0 + it.interestingness) }
                 .take((seedPool.size - maxPoolSize) - toRemove.size)
 
@@ -108,7 +123,7 @@ class EnergySeedManager(
         if (toBoost.size < minActiveSeedsThreshold) {
             val remainder = seedPool
                 .filterNot { it in toBoost }
-                .sortedBy { it.energy }
+                .sortedByDescending { it.interestingness }
                 .take(minActiveSeedsThreshold - toBoost.size)
 
             toBoost.addAll(remainder)
@@ -118,8 +133,6 @@ class EnergySeedManager(
             it.energy += energyBoost
             println("Восстановлена энергия: ${it.description}, новая энергия: ${it.energy}, верифицирован: ${it.verified}")
         }
-
-        boostInitialSeeds()
     }
 
     private fun boostInitialSeeds() {
@@ -151,18 +164,12 @@ class EnergySeedManager(
     }
 
     private fun removeDeadSeeds() {
-        seedPool.removeIf { it.energy <= 0 && !it.verified && !isInitial(it) }
-    }
-
-    private fun isInitial(seed: Seed): Boolean {
-        return initialSeeds.any { it.bytecodeEntry.bytecode.contentEquals(seed.bytecodeEntry.bytecode) }
+        seedPool.removeIf { it.energy <= 0 && !it.verified && !it.initial }
     }
 
     private fun selectWeightedByEnergy(seeds: List<Seed>): Seed? {
-        val verificationBonus = 2.0
-
         val weighted = seeds.map {
-            val weight = if (it.verified) (it.energy * verificationBonus).toInt() else it.energy
+            val weight = if (it.verified) (it.energy * VERIFICATION_BONUS).toInt() else it.energy
             it to weight
         }
 

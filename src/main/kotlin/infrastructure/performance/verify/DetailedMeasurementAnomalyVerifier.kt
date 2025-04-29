@@ -22,7 +22,7 @@ class DetailedMeasurementAnomalyVerifier(
     private val performanceAnalyzer: PerformanceAnalyzer,
     private val anomalyRepository: AnomalyRepository,
     private val jitAnalyzer: JITAnalyzer? = null,
-    private val periodBetweenDetailedChecks: Int = 100,
+    private val periodBetweenDetailedChecks: Int = 300,
     private val minSeedsForDetailedCheck: Int = 10,
     private val countOfMostInterestedSeedsToVerify: Int = 3
 ) : AnomalyVerifier {
