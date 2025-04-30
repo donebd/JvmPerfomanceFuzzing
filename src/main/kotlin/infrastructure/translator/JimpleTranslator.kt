@@ -97,11 +97,11 @@ class JimpleTranslator {
      * @throws IllegalArgumentException Если парсинг не удался.
      */
     fun parseSootClass(jimpleCode: String, className: String, packageName: String): SootClass {
-        val code = preprocessJimpleCode(jimpleCode)
+        val cleanClassName = className.split(".").last()
+        val code = preprocessJimpleCode(jimpleCode, cleanClassName, packageName)
         val tempDir = Files.createTempDirectory("jimple_temp")
         try {
             // Создаём временный файл с Jimple-кодом
-            val cleanClassName = className.split(".").last()
             val jimpleClassName = "$packageName.$cleanClassName"
             val jimpleFile = tempDir.resolve("$jimpleClassName.jimple").toFile()
             jimpleFile.writeText(code)
@@ -124,13 +124,47 @@ class JimpleTranslator {
         }
     }
 
-    private fun preprocessJimpleCode(jimpleCode: String): String {
-        // Замена булевых литералов на числовые эквиваленты
-        return jimpleCode
+    /**
+     * Предварительная обработка Jimple-кода для исправления несогласованностей в именах классов
+     *
+     * @param jimpleCode Исходный Jimple-код
+     * @param className Простое имя класса (без пакета)
+     * @param packageName Имя пакета
+     * @return Исправленный Jimple-код
+     */
+    private fun preprocessJimpleCode(jimpleCode: String, className: String, packageName: String): String {
+        val fullClassName = "$packageName.$className"
+
+        // Базовые замены для булевых значений
+        var fixedCode = jimpleCode
             .replace(" == false", " == 0")
             .replace(" == true", " == 1")
             .replace(" != false", " != 0")
             .replace(" != true", " != 1")
+
+        // Исправляем все упоминания класса без пакета
+        fixedCode = fixedCode
+            .replace("$className $", "$fullClassName $")
+            .replace("($className)", "($fullClassName)")
+            .replace("new $className", "new $fullClassName")
+            .replace("<$className:", "<$fullClassName:")
+            .replace("$className.", "$fullClassName.")
+            .replace("$className[]", "$fullClassName[]")
+            .replace("$className<", "$fullClassName<")
+            .replace("@$className", "@$fullClassName")
+
+        // Исправление extends/implements
+        if (fixedCode.contains("extends $className ")) {
+            fixedCode = fixedCode.replace("extends $className ", "extends $fullClassName ")
+        }
+        if (fixedCode.contains("implements $className")) {
+            fixedCode = fixedCode.replace("implements $className", "implements $fullClassName")
+        }
+
+        // Исправление вложенных классов: ClassName$Inner -> package.ClassName$Inner
+        fixedCode = fixedCode.replace("$className$$", "$fullClassName$$")
+
+        return fixedCode
     }
 
     /**
