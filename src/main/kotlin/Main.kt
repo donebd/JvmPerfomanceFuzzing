@@ -15,9 +15,11 @@ import infrastructure.translator.JimpleTranslator
 fun main() {
     val packageName = "benchmark"
     val classNames = listOf(
+        "MergeSort",
         "MatrixMultiplier", "BubbleSort", "MathOperations",
         "Boxing", "PositiveNegative", "StringProcessor",
-        "CollectionBenchmark", "PrimeChecker", "RecursiveFibonacci",
+        "CollectionBenchmark", "PrimeChecker",
+        "RecursiveFibonacci",
         "ExceptionHandlingExample"
     )
 
