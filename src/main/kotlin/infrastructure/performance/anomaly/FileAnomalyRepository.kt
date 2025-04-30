@@ -111,10 +111,9 @@ class FileAnomalyRepository(
     }
 
     private fun copyJmhReports(seed: Seed, jmhReportsDir: File): Int {
-        var reportsCopied = 0
+        val jmhReports = mutableSetOf<String>()
 
-        val anomalyGroup = seed.anomalies.find { it.anomalyType !== AnomalyGroupType.JIT }
-        anomalyGroup?.let {
+        seed.anomalies.forEach { anomalyGroup ->
             val allJvms = anomalyGroup.fasterJvms + anomalyGroup.slowerJvms
 
             allJvms.forEach { jvmResult ->
@@ -124,15 +123,16 @@ class FileAnomalyRepository(
                         val targetFileName =
                             "jmh_${anomalyGroup.anomalyType.name.lowercase()}_${jvmResult.jvmName}.json"
                         val targetFile = File(jmhReportsDir, targetFileName)
-
-                        sourceFile.copyTo(targetFile, overwrite = true)
-                        reportsCopied++
+                        if (!targetFile.exists()) {
+                            sourceFile.copyTo(targetFile, overwrite = true)
+                            jmhReports.add(targetFileName)
+                        }
                     }
                 }
             }
         }
 
-        return reportsCopied
+        return jmhReports.size
     }
 
     private fun generateJitReports(seed: Seed, anomaliesDir: File) {
