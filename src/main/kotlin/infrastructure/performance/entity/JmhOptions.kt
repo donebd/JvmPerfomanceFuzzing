@@ -1,10 +1,10 @@
 package infrastructure.performance.entity
 
 data class JmhOptions(
-    val warmupIterations: Long = 2,
-    val warmupTimeSeconds: Long = 2,
+    val warmupIterations: Long = 1,
+    val warmupTimeSeconds: Long = 4,
     val measurementIterations: Long = 3,
-    val measurementTimeSeconds: Long = 4,
+    val measurementTimeSeconds: Long = 5,
     val forks: Int = 1
 ) {
     val executionTimeout: Long

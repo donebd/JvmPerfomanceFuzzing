@@ -29,7 +29,7 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
     ): List<Pair<JvmExecutor, PerformanceMetrics>> {
         validateClassPath(classpath)
 
-        val jmhConfig = if (quickMeasurement) JmhOptions() else JmhOptions(5, 5, 5, 10)
+        val jmhConfig = if (quickMeasurement) JmhOptions() else JmhOptions(2, 10, 4, 15)
         return measureAll(executors, classpath, packageName, className, jmhConfig, jvmOptionsProvider)
     }
 
