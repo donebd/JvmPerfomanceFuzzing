@@ -30,7 +30,20 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         validateClassPath(classpath)
 
         val jmhConfig = if (quickMeasurement) JmhOptions() else JmhOptions(5, 5, 5, 10)
-        val benchmarkFile = prepareBenchmarkFile(classpath, packageName, className, jmhConfig)
+        return measureAll(executors, classpath, packageName, className, jmhConfig, jvmOptionsProvider)
+    }
+
+    override fun measureAll(
+        executors: List<JvmExecutor>,
+        classpath: File,
+        packageName: String,
+        className: String,
+        jmhOptions: JmhOptions,
+        jvmOptionsProvider: (JvmExecutor) -> List<String>
+    ): List<Pair<JvmExecutor, PerformanceMetrics>> {
+        validateClassPath(classpath)
+
+        val benchmarkFile = prepareBenchmarkFile(classpath, packageName, className, jmhOptions)
         val jmhClasspath = getJmhClasspath()
 
         return executors.map { executor ->
@@ -45,40 +58,12 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
                 fullClasspath,
                 relativeBenchmarkPath,
                 emptyList(),
-                jmhConfig.executionTimeout,
+                jmhOptions.executionTimeout,
                 jvmOptions
             )
 
             executor to parseJMHResults(jmhResult, benchmarkFile.resultFile, jvmName)
         }
-    }
-
-    override fun measure(
-        executor: JvmExecutor,
-        classpath: File,
-        packageName: String,
-        className: String,
-        jmhOptions: JmhOptions,
-        jvmOptions: List<String>
-    ): PerformanceMetrics {
-        validateClassPath(classpath)
-
-        val benchmarkFile = prepareBenchmarkFile(classpath, packageName, className, jmhOptions)
-        val jmhClasspath = getJmhClasspath()
-
-        val fullClasspath = "${classpath.absolutePath}:$jmhClasspath"
-        val relativeBenchmarkPath = "$packageName.$BENCHMARK_CLASS_NAME"
-
-        val jmhResult = executor.execute(
-            classpath,
-            fullClasspath,
-            relativeBenchmarkPath,
-            emptyList(),
-            jmhOptions.executionTimeout,
-            jvmOptions
-        )
-
-        return parseJMHResults(jmhResult, benchmarkFile.resultFile, executor::class.simpleName ?: "unknown")
     }
 
     private fun validateClassPath(classpath: File) {

@@ -1,6 +1,8 @@
 package infrastructure.performance.anomaly
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import core.mutation.MutationRecord
+import core.seed.BytecodeEntry
 import core.seed.Seed
 import core.seed.Seed.Companion.clearSignificanceLevel
 import infrastructure.jit.JITReportGenerator
@@ -20,6 +22,29 @@ class FileAnomalyRepository(
     private val objectMapper = jacksonObjectMapper()
     private val rootDir = File(directoryPath).apply { mkdirs() }
     private val timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+    override fun getAllSeeds(): List<Seed> {
+        if (!rootDir.exists() || !rootDir.isDirectory) {
+            println("Репозиторий аномалий не существует: ${rootDir.absolutePath}")
+            return emptyList()
+        }
+
+        val seedDirectories = rootDir.listFiles { file ->
+            file.isDirectory && file.name.startsWith("seed_")
+        } ?: return emptyList()
+
+        println("Найдено ${seedDirectories.size} директорий с сидами")
+
+        return seedDirectories.mapNotNull { seedDir ->
+            try {
+                loadSeedFromDirectory(seedDir)
+            } catch (e: Exception) {
+                println("Ошибка при загрузке сида из директории ${seedDir.name}: ${e.message}")
+                e.printStackTrace()
+                null
+            }
+        }
+    }
 
     override fun saveSeedAnomalies(seed: Seed) {
         if (seed.anomalies.isEmpty()) {
@@ -42,6 +67,88 @@ class FileAnomalyRepository(
     override fun clear() {
         rootDir.listFiles()?.forEach { it.deleteRecursively() }
         println("Репозиторий аномалий очищен")
+    }
+
+    /**
+     * Загружает сид из указанной директории.
+     */
+    private fun loadSeedFromDirectory(seedDir: File): Seed? {
+        val seedInfoFile = File(seedDir, "seed_info.json")
+        if (!seedInfoFile.exists()) {
+            println("Отсутствует файл информации о сиде: ${seedInfoFile.absolutePath}")
+            return null
+        }
+
+        val seedInfo = objectMapper.readValue(seedInfoFile.readText(), Map::class.java)
+
+        val bytecodeDir = File(seedDir, "bytecode")
+        if (!bytecodeDir.exists() || !bytecodeDir.isDirectory) {
+            println("Отсутствует директория байткода: ${bytecodeDir.absolutePath}")
+            return null
+        }
+
+        val className = seedInfo["className"] as String
+        val packageName = seedInfo["packageName"] as String
+
+        val classFile = bytecodeDir.listFiles { file ->
+            file.isFile && file.name == "$className.class"
+        }?.firstOrNull()
+
+        if (classFile == null) {
+            println("Не найден файл байткода для класса $className в ${bytecodeDir.absolutePath}")
+            return null
+        }
+
+        val bytecode = Files.readAllBytes(classFile.toPath())
+
+        val anomaliesDir = File(seedDir, "anomalies")
+        val anomalies = if (anomaliesDir.exists() && anomaliesDir.isDirectory) {
+            anomaliesDir.listFiles { file ->
+                file.isFile && file.name.startsWith("anomaly_") && file.name.endsWith(".json")
+            }?.mapNotNull { anomalyFile ->
+                try {
+                    objectMapper.readValue(anomalyFile.readText(), PerformanceAnomalyGroup::class.java)
+                } catch (e: Exception) {
+                    println("Ошибка при загрузке аномалии из файла ${anomalyFile.name}: ${e.message}")
+                    null
+                }
+            } ?: emptyList()
+        } else {
+            emptyList()
+        }
+
+        val bytecodeEntry = BytecodeEntry(bytecode, className, packageName)
+
+        @Suppress("UNCHECKED_CAST")
+        val mutationHistory = try {
+            (seedInfo["mutationHistory"] as List<Map<String, String>>).map { mutationMap ->
+                MutationRecord(
+                    parentSeedDescription = mutationMap["parentSeedDescription"] as String,
+                    strategyName = mutationMap["strategyName"] as String,
+                    timestamp = mutationMap["timestamp"] as String
+                )
+            }
+        } catch (e: Exception) {
+            println("Ошибка при загрузке истории мутаций: ${e.message}")
+            emptyList()
+        }
+
+        val interestingness = (seedInfo["interestingness"] as Number).toDouble()
+        val verified = seedInfo["verified"] as Boolean
+        val description = seedInfo["description"] as String
+        val energy = Seed.calculateEnergy(interestingness)
+
+        return Seed(
+            bytecodeEntry = bytecodeEntry,
+            mutationHistory = mutationHistory,
+            energy = energy,
+            description = description,
+            interestingness = interestingness,
+            anomalies = anomalies,
+            verified = verified,
+            initial = false,
+            iteration = 0
+        )
     }
 
     private data class DirectoryStructure(

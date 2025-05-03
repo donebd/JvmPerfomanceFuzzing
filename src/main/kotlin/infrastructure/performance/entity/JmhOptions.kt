@@ -9,10 +9,10 @@ data class JmhOptions(
 ) {
     val executionTimeout: Long
         get(): Long {
-            val jmhTime = warmupIterations * warmupTimeSeconds +
-                    measurementIterations * measurementTimeSeconds;
+            val jmhTime = (warmupIterations * warmupTimeSeconds +
+                    measurementIterations * measurementTimeSeconds) * forks
 
-            val timeoutTimeReserve = maxOf(10, (jmhTime * 0.25).toLong())
+            val timeoutTimeReserve = maxOf(20, (jmhTime * 0.5).toLong())
 
             return jmhTime + timeoutTimeReserve
         }

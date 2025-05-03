@@ -11,6 +11,12 @@ interface AnomalyRepository {
     fun saveSeedAnomalies(seed: Seed)
 
     /**
+     * Загружает все сиды с аномалиями из репозитория.
+     * @return Список всех сидов, найденных в репозитории
+     */
+    fun getAllSeeds(): List<Seed>
+
+    /**
      * Удаляет все аномалии из репозитория.
      */
     fun clear()
