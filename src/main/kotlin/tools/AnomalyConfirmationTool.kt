@@ -36,10 +36,10 @@ class AnomalyConfirmationTool(
 
     // Высокоточные настройки для верификации
     private val verificationJmhOptions = JmhOptions(
-        3,
-        15,
+        2,
+        20,
         5,
-        30,
+        40,
         3
     )
 
