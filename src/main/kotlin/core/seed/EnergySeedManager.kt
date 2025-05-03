@@ -102,6 +102,7 @@ class EnergySeedManager(
         }
 
         toRemove.forEach {
+            it.cleanAnomaliesArtifactReports()
             seedPool.remove(it)
             println("Удален сид ${it.description}, энергия: ${it.energy}, интересность: ${it.interestingness}, верифицирован: ${it.verified}")
         }
@@ -164,7 +165,16 @@ class EnergySeedManager(
     }
 
     private fun removeDeadSeeds() {
-        seedPool.removeIf { it.energy <= 0 && !it.verified && !it.initial }
+        seedPool.removeIf {
+            val needToRemove = it.energy <= 0 && !it.verified && !it.initial
+
+            if (needToRemove) {
+                it.cleanAnomaliesArtifactReports()
+                println("Удален мертвый сид ${it.description}, энергия: ${it.energy}, интересность: ${it.interestingness}, верифицирован: ${it.verified}")
+            }
+
+            needToRemove
+        }
     }
 
     private fun selectWeightedByEnergy(seeds: List<Seed>): Seed? {

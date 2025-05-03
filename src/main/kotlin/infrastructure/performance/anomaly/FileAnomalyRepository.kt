@@ -121,7 +121,7 @@ class FileAnomalyRepository(
                     val sourceFile = File(reportPath)
                     if (sourceFile.exists()) {
                         val targetFileName =
-                            "jmh_${anomalyGroup.anomalyType.name.lowercase()}_${jvmResult.jvmName}.json"
+                            "jmh_${jvmResult.jvmName}.json"
                         val targetFile = File(jmhReportsDir, targetFileName)
                         if (!targetFile.exists()) {
                             sourceFile.copyTo(targetFile, overwrite = true)
@@ -131,6 +131,7 @@ class FileAnomalyRepository(
                 }
             }
         }
+        seed.cleanAnomaliesArtifactReports()
 
         return jmhReports.size
     }

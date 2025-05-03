@@ -4,6 +4,7 @@ import core.mutation.MutationRecord
 import infrastructure.performance.anomaly.AnomalyGroupType
 import infrastructure.performance.anomaly.PerformanceAnomalyGroup
 import infrastructure.performance.entity.SignificanceLevel
+import java.io.File
 import kotlin.math.max
 
 /**
@@ -33,7 +34,7 @@ data class Seed(
         bytecodeEntry,
         mutationHistory,
         calculateEnergy(interestingness),
-        generateSeedDescription(SignificanceLevel.NOT_SIGNIFICANT, "", anomalies, iteration),
+        generateSeedDescription(SignificanceLevel.NOT_SIGNIFICANT, verified, "", anomalies, iteration),
         interestingness,
         anomalies,
         false,
@@ -46,11 +47,27 @@ data class Seed(
         confirmedAnomalies: List<PerformanceAnomalyGroup>,
         newInterestingness: Double
     ) {
+        cleanAnomaliesArtifactReports()
         anomalies = confirmedAnomalies
         interestingness = newInterestingness
         energy = calculateEnergy(newInterestingness)
         verified = confirmedAnomalies.isNotEmpty()
-        description = generateSeedDescription(significanceLevel, description, anomalies, iteration)
+        description = generateSeedDescription(significanceLevel, verified, description, anomalies, iteration)
+    }
+
+    fun cleanAnomaliesArtifactReports() {
+        anomalies.forEach { anomalyGroup ->
+            val allJvms = anomalyGroup.fasterJvms + anomalyGroup.slowerJvms
+
+            allJvms.forEach { jvmResult ->
+                jvmResult.metrics.jmhReportPath?.let { reportPath ->
+                    val sourceFile = File(reportPath)
+                    if (sourceFile.exists()) {
+                        sourceFile.delete()
+                    }
+                }
+            }
+        }
     }
 
     override fun equals(other: Any?): Boolean {
@@ -73,12 +90,14 @@ data class Seed(
 
         fun generateSeedDescription(
             significanceLevel: SignificanceLevel,
+            verified: Boolean,
             oldDescription: String,
             anomalies: List<PerformanceAnomalyGroup>,
             iteration: Int
         ): String {
+            val verifiedStatus = if (verified) "verified" else "notVerified"
             if (anomalies.isEmpty()) {
-                return oldDescription.clearSignificanceLevel() + "_$significanceLevel"
+                return oldDescription.clearSignificanceLevel() + "_${verifiedStatus}_$significanceLevel"
             }
 
             val types = anomalies.map { it.anomalyType }.distinct().joinToString("_")
@@ -95,11 +114,13 @@ data class Seed(
                 if (anomalies.any { it.anomalyType == AnomalyGroupType.JIT }) add("_jit")
             }
 
-            return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}_${significanceLevel}"
+            return "anomaly_${types}${parts.joinToString("")}_iter_${iteration}_${verifiedStatus}_${significanceLevel}"
         }
 
         fun String.clearSignificanceLevel(): String {
             return this
+                .replace("_verified", "")
+                .replace("_notVerified", "")
                 .replace("_" + SignificanceLevel.NOT_SIGNIFICANT.toString(), "")
                 .replace("_" + SignificanceLevel.SEED_EVOLUTION.toString(), "")
                 .replace("_" + SignificanceLevel.REPORTING.toString(), "")
