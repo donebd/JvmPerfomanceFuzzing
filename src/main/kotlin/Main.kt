@@ -15,12 +15,26 @@ import infrastructure.translator.JimpleTranslator
 fun main() {
     val packageName = "benchmark"
     val classNames = listOf(
-        "MergeSort",
-        "MatrixMultiplier", "BubbleSort", "MathOperations",
-        "Boxing", "PositiveNegative", "StringProcessor",
-        "CollectionBenchmark", "PrimeChecker",
-        "RecursiveFibonacci",
-        "ExceptionHandlingExample"
+        "ArrayManipulationTest",
+        "BitOperations",
+        "Boxing",
+        "BubbleSort",
+        "CollectionBenchmark",
+        "CollectionsProcessor",
+        "ConditionalExpressionTest",
+//        "ExceptionHandlingExample",
+        "ExceptionHandlingPatterns",
+        "FloatingPointOperations",
+        "LambdaAndStreams",
+//        "MergeSort",
+        "MathOperations",
+        "MethodInliningTest",
+        "MatrixMultiplier",
+//        "PositiveNegative",
+        "PrimeChecker",
+//        "RecursiveFibonacci",
+        "StringProcessor",
+        "SwitchPatternTest",
     )
 
     // Create bytecode entries

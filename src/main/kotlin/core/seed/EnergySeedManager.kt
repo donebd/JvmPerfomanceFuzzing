@@ -18,10 +18,11 @@ class EnergySeedManager(
     companion object {
         const val DEFAULT_MAX_POOL_SIZE = 100
         const val DEFAULT_MIN_ENERGY_THRESHOLD = 4
-        const val DEFAULT_ENERGY_BOOST = 5
+        const val DEFAULT_ENERGY_BOOST = 4
 
         const val RANDOM_SELECTION_PROBABILITY = 0.1
-        const val ENERGY_BOOST_THRESHOLD = 0.3
+        const val ENERGY_BOOST_THRESHOLD = 0.5
+        const val ENERGY_INITIAL_BOOST_THRESHOLD = 1.0
         const val VERIFICATION_BONUS = 2.0
     }
 
@@ -61,7 +62,7 @@ class EnergySeedManager(
         }
 
         val initialSeeds = seedPool.filter { it.initial }
-        if (initialSeeds.sumOf { it.energy } * ENERGY_BOOST_THRESHOLD < initialSeeds.size) {
+        if (initialSeeds.sumOf { it.energy } * ENERGY_INITIAL_BOOST_THRESHOLD < initialSeeds.size) {
             boostInitialSeeds()
         }
 
