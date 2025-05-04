@@ -19,20 +19,20 @@ JVM Performance Fuzzer использует комплексный подход 
 // Для быстрых измерений в процессе эволюции сидов
 val evolutionJmhOptions = OptionBuilder()
     .include(".*")
-    .warmupIterations(2)
-    .warmupTime(TimeValue.seconds(2))
+    .warmupIterations(1)
+    .warmupTime(TimeValue.seconds(4))
     .measurementIterations(3)
-    .measurementTime(TimeValue.seconds(4))
+    .measurementTime(TimeValue.seconds(5))
     .forks(1)
     .build()
 
 // Для детальной верификации обнаруженных аномалий
 val verificationJmhOptions = OptionBuilder()
     .include(".*")
-    .warmupIterations(5)
-    .warmupTime(TimeValue.seconds(5))
-    .measurementIterations(5)
-    .measurementTime(TimeValue.seconds(10))
+    .warmupIterations(2)
+    .warmupTime(TimeValue.seconds(10))
+    .measurementIterations(4)
+    .measurementTime(TimeValue.seconds(15))
     .forks(1)
     .build()
 ```
