@@ -41,6 +41,8 @@ dependencies {
     implementation("org.soot-oss:sootup.java.bytecode:1.3.0")
 
     implementation("org.soot-oss:soot:4.6.0")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.6")
 }
 
 tasks.test {
