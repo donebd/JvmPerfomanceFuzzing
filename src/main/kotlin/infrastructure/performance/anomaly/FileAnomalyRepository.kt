@@ -1,5 +1,7 @@
 package infrastructure.performance.anomaly
 
+import com.fasterxml.jackson.core.StreamReadConstraints
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import core.mutation.MutationRecord
 import core.seed.BytecodeEntry
@@ -19,7 +21,12 @@ class FileAnomalyRepository(
     directoryPath: String,
     private val jitReportGenerator: JITReportGenerator = JITReportGenerator()
 ) : AnomalyRepository {
-    private val objectMapper = jacksonObjectMapper()
+    private val objectMapper = jacksonObjectMapper().apply {
+        configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        factory.setStreamReadConstraints(
+            StreamReadConstraints.builder().maxStringLength(50_000_000).build()
+        )
+    }
     private val rootDir = File(directoryPath).apply { mkdirs() }
     private val timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 

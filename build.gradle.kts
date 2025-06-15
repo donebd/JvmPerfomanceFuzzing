@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.0.21"
+    kotlin("kapt") version "2.0.21"
     java
     application
 }
@@ -23,7 +24,7 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.+")
 
     implementation("org.openjdk.jmh:jmh-core:1.37")
-    annotationProcessor("org.openjdk.jmh:jmh-generator-annprocess:1.37")
+    kapt("org.openjdk.jmh:jmh-generator-annprocess:1.37")
 
     // ASM
     implementation("org.ow2.asm:asm:9.5")

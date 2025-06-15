@@ -40,6 +40,30 @@ RUN wget -q https://github.com/ibmruntimes/semeru17-binaries/releases/download/j
 #     && apt-get update && apt-get install -y /tmp/axiomjdk.deb \
 #     && rm /tmp/axiomjdk.deb
 
+
+
+# # --- HOTSPOT 21 ---
+# RUN wget -q https://download.oracle.com/java/21/latest/jdk-21_linux-x64_bin.tar.gz \
+#     && mkdir -p /opt/hotspot21 \
+#     && tar -xzf jdk-21_linux-x64_bin.tar.gz -C /opt/hotspot21 --strip-components=1 \
+#     && rm jdk-21_linux-x64_bin.tar.gz
+# # Устанавливаем GraalVM 21
+# RUN wget -q https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz \
+#     && mkdir -p /opt/graalvm21 \
+#     && tar -xzf graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz -C /opt \
+#     && mv /opt/graalvm-community-openjdk-21.0.2+13.1/* /opt/graalvm21/ \
+#     && rm -rf /opt/graalvm-community-openjdk-21.0.2+13.1 \
+#     && rm graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz \
+#     && /opt/graalvm21/bin/gu install native-image
+#
+# # Устанавливаем OpenJ9 21
+# RUN wget -q https://github.com/ibmruntimes/semeru21-binaries/releases/download/jdk-21.0.7%2B6_openj9-0.51.0/ibm-semeru-open-jdk_x64_linux_21.0.7_6_openj9-0.51.0.tar.gz \
+#     && mkdir -p /opt/openj9vm21 \
+#     && tar -xzf ibm-semeru-open-jdk_x64_linux_21.0.7_6_openj9-0.51.0.tar.gz -C /opt \
+#     && mv /opt/jdk-21.0.7+6/* /opt/openj9vm21/ \
+#     && rm -rf /opt/jdk-21.0.7+6 \
+#     && rm ibm-semeru-open-jdk_x64_linux_21.0.7_6_openj9-0.51.0.tar.gz
+
 # Gradle
 RUN wget -q https://services.gradle.org/distributions/gradle-7.6-bin.zip \
     && unzip gradle-7.6-bin.zip -d /opt \
@@ -65,7 +89,9 @@ RUN echo '{ \
 }' > /app/src/main/resources/jvm_config.json
 
 # Сборка проекта
-RUN chmod +x ./gradlew && ./gradlew clean jar -x test
+RUN chmod +x ./gradlew \
+ && ./gradlew compileJava -x test \
+ && ./gradlew clean jar -x test
 
 # Создаём папку для результатов
 RUN mkdir -p /app/anomalies
