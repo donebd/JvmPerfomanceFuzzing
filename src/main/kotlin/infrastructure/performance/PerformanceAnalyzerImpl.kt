@@ -19,9 +19,9 @@ import kotlin.math.min
 class PerformanceAnalyzerImpl(
     private val jitAnalyzer: JITAnalyzer? = null,
     private val significantTimeThreshold: Double = 10.0,
-    private val significantMemoryThreshold: Double = 10.0,
+    private val significantMemoryThreshold: Double = 50.0,
     private val potentialTimeThreshold: Double = 1.0,
-    private val potentialMemoryThreshold: Double = 1.0
+    private val potentialMemoryThreshold: Double = 30.0
 ) : PerformanceAnalyzer {
 
     companion object {

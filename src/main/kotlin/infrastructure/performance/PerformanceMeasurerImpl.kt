@@ -98,6 +98,8 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
 
     private fun compileBenchmarkClass(classpath: File, benchmarkFile: File) {
         val compiler = ToolProvider.getSystemJavaCompiler()
+        requireNotNull(compiler) { "Java compiler not available. Ensure JDK is installed." }
+
         val fileManager = compiler.getStandardFileManager(null, null, null)
 
         fileManager.use { manager ->
@@ -129,8 +131,9 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
             .map { it.absolutePath }
             .toList()
 
-        if (jmhJars.isEmpty()) {
-            throw RuntimeException("Не найдены JMH JAR'ы версии $JMH_VERSION в Gradle кэше")
+        if (jmhJars.size != jmhDependencies.size) {
+            throw RuntimeException("Не найдены JMH JAR'ы версии $JMH_VERSION в Gradle кэше. " +
+                    "Не найдены: ${jmhDependencies.filter { jmhDep -> jmhJars.none { it.contains(jmhDep) } }}")
         }
 
         return jmhJars.joinToString(File.pathSeparator)
@@ -153,8 +156,6 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
         import org.openjdk.jmh.runner.options.OptionsBuilder;
         import org.openjdk.jmh.runner.options.TimeValue;
         
-        import java.lang.management.ManagementFactory;
-        import com.sun.management.OperatingSystemMXBean;
         import java.util.concurrent.TimeUnit;
 
         @BenchmarkMode(Mode.AverageTime)
@@ -164,7 +165,6 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
 
             private $className instance = new $className();
             
-            private OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
             private long totalMemoryUsedInKB = 0;
             private int iterations = 0;
 
@@ -180,7 +180,7 @@ class PerformanceMeasurerImpl : PerformanceMeasurer {
 
             @TearDown(Level.Invocation)
             public void tearDown() {
-                long usedMemory = osBean.getTotalPhysicalMemorySize() - osBean.getFreePhysicalMemorySize();
+                long usedMemory = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
                 totalMemoryUsedInKB += (usedMemory >> 10);
                 iterations++;
             }

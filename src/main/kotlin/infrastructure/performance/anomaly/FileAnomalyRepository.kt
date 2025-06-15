@@ -207,13 +207,11 @@ class FileAnomalyRepository(
             val filePrefix = generateAnomalyFilePrefix(anomalyGroup, index)
             val anomalyFile = File(directories.anomaliesDir, "anomaly_${filePrefix}_$timestampString.json")
 
-            val anomalyJson = if (anomalyGroup.anomalyType == AnomalyGroupType.JIT) {
-                objectMapper.writeValueAsString(anomalyGroup)
+            if (anomalyGroup.anomalyType == AnomalyGroupType.JIT) {
+                objectMapper.writeValue(anomalyFile, anomalyGroup)
             } else {
-                objectMapper.writeValueAsString(anomalyGroup.copy(jitData = null))
+                objectMapper.writeValue(anomalyFile, anomalyGroup.copy(jitData = null))
             }
-
-            anomalyFile.writeText(anomalyJson)
         }
 
         val reportsCopied: Int = copyJmhReports(seed, directories.jmhReportsDir)
